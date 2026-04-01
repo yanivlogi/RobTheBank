@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 7eae21fd72044024faced191a8e7255b
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - hexPrefab: {fileID: 4112673331206430118, guid: efd13b224864f4348956f52a157c3348, type: 3}
+  - woodSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  - brickSprite: {instanceID: 0}
+  - wheatSprite: {instanceID: 0}
+  - sheepSprite: {instanceID: 0}
+  - oreSprite: {instanceID: 0}
+  - desertSprite: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

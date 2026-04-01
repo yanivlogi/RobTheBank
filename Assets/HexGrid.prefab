@@ -1,0 +1,65 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &6060353449965114229
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6060353449965114231}
+  - component: {fileID: 6060353449965114228}
+  m_Layer: 0
+  m_Name: HexGrid
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6060353449965114231
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6060353449965114229}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6060353449965114228
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6060353449965114229}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7eae21fd72044024faced191a8e7255b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  hexPrefab: {fileID: 4112673331206430118, guid: efd13b224864f4348956f52a157c3348, type: 3}
+  mapRadius: 2
+  hexSize: 2
+  resourceTypes:
+  - Wood
+  - Brick
+  - Wheat
+  - Sheep
+  - Ore
+  - Desert
+  possibleNumbers: 020000000300000003000000040000000400000005000000050000000600000006000000080000000800000009000000090000000a0000000a0000000b0000000b0000000c0000000c000000
+  woodSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  brickSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  wheatSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  sheepSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  oreSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  desertSprite: {fileID: 21300000, guid: 735276c5122f5844196f011b31ae4c91, type: 3}
+  buildPointPrefab: {fileID: 0}
+  roadPointPrefab: {fileID: 0}
