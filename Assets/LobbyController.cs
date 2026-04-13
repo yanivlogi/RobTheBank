@@ -30,6 +30,7 @@ public class LobbyController : MonoBehaviour
     [Header("Panels")]
     public GameObject hostSettingsPanel;
     public GameObject joinPanel;
+    public GameObject HostPanel;
 
     [Header("Settings Fields")]
     public TMP_InputField pointsInput;
@@ -133,6 +134,11 @@ public class LobbyController : MonoBehaviour
     {
         if (joinPanel != null)
             joinPanel.SetActive(false);
+    }
+    public void CloseHostPanel()
+    {
+        if (HostPanel != null)
+            HostPanel.SetActive(false);
     }
 
     public async void FinalCreateGame()
