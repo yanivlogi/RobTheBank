@@ -14,6 +14,10 @@ using System.Threading.Tasks;
 
 public class LobbyController : MonoBehaviour
 {
+[Header("Player Settings")]
+public TMP_InputField playerNameInput;
+public Button saveNameButton;
+
     [Header("Join UI")]
     public Transform lobbyListContent;
     public GameObject lobbyItemPrefab;
@@ -108,6 +112,14 @@ public class LobbyController : MonoBehaviour
         if (waitingRoomPanel != null)
             waitingRoomPanel.SetActive(false);
     }
+    private string GetPlayerName()
+{
+    if (playerNameInput != null && !string.IsNullOrWhiteSpace(playerNameInput.text))
+        return playerNameInput.text.Trim();
+
+    return "Player";
+}
+
 
     public async void OpenJoinPanel()
     {
@@ -141,109 +153,121 @@ public class LobbyController : MonoBehaviour
             HostPanel.SetActive(false);
     }
 
-    public async void FinalCreateGame()
+   public async void FinalCreateGame()
+{
+    if (!servicesReady)
     {
-        if (!servicesReady)
+        Debug.LogWarning("השירותים עדיין לא מוכנים.");
+        return;
+    }
+
+    try
+    {
+        string maxPoints = pointsInput != null && !string.IsNullOrWhiteSpace(pointsInput.text)
+            ? pointsInput.text
+            : "10";
+
+        string turnTime = turnTimeInput != null && !string.IsNullOrWhiteSpace(turnTimeInput.text)
+            ? turnTimeInput.text
+            : "60";
+
+        string allowTrade = allowTradeToggle != null
+            ? allowTradeToggle.isOn.ToString()
+            : "true";
+
+        string playerName = GetPlayerName();
+
+        Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4);
+        string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+
+        CreateLobbyOptions options = new CreateLobbyOptions
         {
-            Debug.LogWarning("השירותים עדיין לא מוכנים.");
+            IsPrivate = false,
+
+            Player = new Player
+            {
+                Data = new Dictionary<string, PlayerDataObject>
+                {
+                    { "PlayerName", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, playerName) }
+                }
+            },
+
+            Data = new Dictionary<string, DataObject>
+            {
+                { "JoinCode", new DataObject(DataObject.VisibilityOptions.Member, joinCode) },
+                { "MaxPoints", new DataObject(DataObject.VisibilityOptions.Public, maxPoints) },
+                { "TurnTime", new DataObject(DataObject.VisibilityOptions.Public, turnTime) },
+                { "AllowTrade", new DataObject(DataObject.VisibilityOptions.Public, allowTrade) }
+            }
+        };
+
+        joinedLobby = await LobbyService.Instance.CreateLobbyAsync("Catan Room", 4, options);
+
+        Debug.Log("לובי נוצר בהצלחה!");
+        Debug.Log("Lobby ID: " + joinedLobby.Id);
+        Debug.Log("Relay Join Code: " + joinCode);
+        Debug.Log("Host Player Name: " + playerName);
+
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager.Singleton הוא null");
             return;
         }
 
-        try
+        UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        if (transport == null)
         {
-            string maxPoints = pointsInput != null && !string.IsNullOrWhiteSpace(pointsInput.text)
-                ? pointsInput.text
-                : "10";
-
-            string turnTime = turnTimeInput != null && !string.IsNullOrWhiteSpace(turnTimeInput.text)
-                ? turnTimeInput.text
-                : "60";
-
-            string allowTrade = allowTradeToggle != null
-                ? allowTradeToggle.isOn.ToString()
-                : "true";
-
-            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4);
-            string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
-
-            CreateLobbyOptions options = new CreateLobbyOptions
-            {
-                IsPrivate = false,
-                Data = new Dictionary<string, DataObject>
-                {
-                    { "JoinCode", new DataObject(DataObject.VisibilityOptions.Member, joinCode) },
-                    { "MaxPoints", new DataObject(DataObject.VisibilityOptions.Public, maxPoints) },
-                    { "TurnTime", new DataObject(DataObject.VisibilityOptions.Public, turnTime) },
-                    { "AllowTrade", new DataObject(DataObject.VisibilityOptions.Public, allowTrade) }
-                }
-            };
-
-            joinedLobby = await LobbyService.Instance.CreateLobbyAsync("Catan Room", 4, options);
-
-            Debug.Log("לובי נוצר בהצלחה!");
-            Debug.Log("Lobby ID: " + joinedLobby.Id);
-            Debug.Log("Relay Join Code: " + joinCode);
-
-            if (NetworkManager.Singleton == null)
-            {
-                Debug.LogError("NetworkManager.Singleton הוא null");
-                return;
-            }
-
-            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.LogError("UnityTransport לא נמצא על NetworkManager");
-                return;
-            }
-
-            transport.SetHostRelayData(
-                allocation.RelayServer.IpV4,
-                (ushort)allocation.RelayServer.Port,
-                allocation.AllocationIdBytes,
-                allocation.Key,
-                allocation.ConnectionData
-            );
-
-            bool hostStarted = NetworkManager.Singleton.StartHost();
-            Debug.Log("StartHost result: " + hostStarted);
-
-            if (!hostStarted)
-            {
-                Debug.LogError("StartHost נכשל");
-                return;
-            }
-
-            heartbeatTimer = 15f;
-            lobbyPollTimer = 1f;
-
-            if (hostSettingsPanel != null)
-                hostSettingsPanel.SetActive(false);
-
-            if (joinPanel != null)
-                joinPanel.SetActive(false);
-
-            if (waitingRoomPanel != null)
-                waitingRoomPanel.SetActive(true);
-
-            if (waitingRoomNameText != null)
-                waitingRoomNameText.text = joinedLobby.Name;
-
-            if (waitingRoomStatusText != null)
-                waitingRoomStatusText.text = "Waiting for players...";
-
-            if (startGameButton != null)
-                startGameButton.gameObject.SetActive(true);
-
-            RefreshPlayers();
-
-            Debug.Log("המשחק באוויר, מחכה לשחקנים...");
+            Debug.LogError("UnityTransport לא נמצא על NetworkManager");
+            return;
         }
-        catch (System.Exception e)
+
+        transport.SetHostRelayData(
+            allocation.RelayServer.IpV4,
+            (ushort)allocation.RelayServer.Port,
+            allocation.AllocationIdBytes,
+            allocation.Key,
+            allocation.ConnectionData
+        );
+
+        bool hostStarted = NetworkManager.Singleton.StartHost();
+        Debug.Log("StartHost result: " + hostStarted);
+
+        if (!hostStarted)
         {
-            Debug.LogError("שגיאה ביצירת משחק: " + e);
+            Debug.LogError("StartHost נכשל");
+            return;
         }
+
+        heartbeatTimer = 15f;
+        lobbyPollTimer = 1f;
+
+        if (hostSettingsPanel != null)
+            hostSettingsPanel.SetActive(false);
+
+        if (joinPanel != null)
+            joinPanel.SetActive(false);
+
+        if (waitingRoomPanel != null)
+            waitingRoomPanel.SetActive(true);
+
+        if (waitingRoomNameText != null)
+            waitingRoomNameText.text = joinedLobby.Name;
+
+        if (waitingRoomStatusText != null)
+            waitingRoomStatusText.text = "Waiting for players...";
+
+        if (startGameButton != null)
+            startGameButton.gameObject.SetActive(true);
+
+        RefreshPlayers();
+
+        Debug.Log("המשחק באוויר, מחכה לשחקנים...");
     }
+    catch (System.Exception e)
+    {
+        Debug.LogError("שגיאה ביצירת משחק: " + e);
+    }
+}
 
     public async void ListLobbies()
     {
@@ -346,124 +370,152 @@ public class LobbyController : MonoBehaviour
         await JoinLobbyById(availableLobbies[0].Id);
     }
 
-    public async Task JoinLobbyById(string lobbyId)
+   public async Task JoinLobbyById(string lobbyId)
+{
+    if (!servicesReady)
     {
-        if (!servicesReady)
-        {
-            Debug.LogWarning("השירותים עדיין לא מוכנים.");
-            return;
-        }
-
-        if (NetworkManager.Singleton != null &&
-            (NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsHost))
-        {
-            Debug.LogWarning("כבר מחובר לרשת.");
-            return;
-        }
-
-        try
-        {
-            joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(lobbyId);
-
-            if (joinedLobby == null)
-            {
-                Debug.LogError("JoinLobbyByIdAsync החזיר null");
-                return;
-            }
-
-            if (joinedLobby.Data == null || !joinedLobby.Data.ContainsKey("JoinCode"))
-            {
-                Debug.LogError("לא נמצא JoinCode בלובי");
-                return;
-            }
-
-            string joinCode = joinedLobby.Data["JoinCode"].Value;
-
-            JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
-
-            if (NetworkManager.Singleton == null)
-            {
-                Debug.LogError("NetworkManager.Singleton הוא null");
-                return;
-            }
-
-            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.LogError("UnityTransport לא נמצא על NetworkManager");
-                return;
-            }
-
-            transport.SetClientRelayData(
-                joinAllocation.RelayServer.IpV4,
-                (ushort)joinAllocation.RelayServer.Port,
-                joinAllocation.AllocationIdBytes,
-                joinAllocation.Key,
-                joinAllocation.ConnectionData,
-                joinAllocation.HostConnectionData
-            );
-
-            bool clientStarted = NetworkManager.Singleton.StartClient();
-            Debug.Log("StartClient result: " + clientStarted);
-
-            if (!clientStarted)
-            {
-                Debug.LogError("StartClient נכשל");
-                return;
-            }
-
-            lobbyPollTimer = 1f;
-
-            if (hostSettingsPanel != null)
-                hostSettingsPanel.SetActive(false);
-
-            if (joinPanel != null)
-                joinPanel.SetActive(false);
-
-            if (waitingRoomPanel != null)
-                waitingRoomPanel.SetActive(true);
-
-            if (waitingRoomNameText != null)
-                waitingRoomNameText.text = joinedLobby.Name;
-
-            if (waitingRoomStatusText != null)
-                waitingRoomStatusText.text = "Joined room";
-
-            if (startGameButton != null)
-                startGameButton.gameObject.SetActive(false);
-
-            RefreshPlayers();
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError("שגיאה בהצטרפות לחדר: " + e);
-        }
+        Debug.LogWarning("השירותים עדיין לא מוכנים.");
+        return;
     }
 
-    private void RefreshPlayers()
+    if (NetworkManager.Singleton != null &&
+        (NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsHost))
     {
-        if (playersListContent == null || playerItemPrefab == null || joinedLobby == null)
-            return;
-
-        for (int i = playersListContent.childCount - 1; i >= 0; i--)
-        {
-            Destroy(playersListContent.GetChild(i).gameObject);
-        }
-
-        if (joinedLobby.Players == null)
-            return;
-
-        foreach (var player in joinedLobby.Players)
-        {
-            GameObject obj = Instantiate(playerItemPrefab, playersListContent);
-            PlayerListItem item = obj.GetComponent<PlayerListItem>();
-
-            string playerName = string.IsNullOrWhiteSpace(player.Id) ? "Player" : player.Id;
-
-            if (item != null)
-                item.Setup(playerName);
-        }
+        Debug.LogWarning("כבר מחובר לרשת.");
+        return;
     }
+
+    try
+    {
+        string playerName = GetPlayerName();
+
+        JoinLobbyByIdOptions joinOptions = new JoinLobbyByIdOptions
+        {
+            Player = new Player
+            {
+                Data = new Dictionary<string, PlayerDataObject>
+                {
+                    { "PlayerName", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, playerName) }
+                }
+            }
+        };
+
+        joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(lobbyId, joinOptions);
+
+        if (joinedLobby == null)
+        {
+            Debug.LogError("JoinLobbyByIdAsync החזיר null");
+            return;
+        }
+
+        if (joinedLobby.Data == null || !joinedLobby.Data.ContainsKey("JoinCode"))
+        {
+            Debug.LogError("לא נמצא JoinCode בלובי");
+            return;
+        }
+
+        string joinCode = joinedLobby.Data["JoinCode"].Value;
+        Debug.Log("Joined with player name: " + playerName);
+
+        JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
+
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager.Singleton הוא null");
+            return;
+        }
+
+        UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        if (transport == null)
+        {
+            Debug.LogError("UnityTransport לא נמצא על NetworkManager");
+            return;
+        }
+
+        transport.SetClientRelayData(
+            joinAllocation.RelayServer.IpV4,
+            (ushort)joinAllocation.RelayServer.Port,
+            joinAllocation.AllocationIdBytes,
+            joinAllocation.Key,
+            joinAllocation.ConnectionData,
+            joinAllocation.HostConnectionData
+        );
+
+        bool clientStarted = NetworkManager.Singleton.StartClient();
+        Debug.Log("StartClient result: " + clientStarted);
+
+        if (!clientStarted)
+        {
+            Debug.LogError("StartClient נכשל");
+            return;
+        }
+
+        lobbyPollTimer = 1f;
+
+        if (hostSettingsPanel != null)
+            hostSettingsPanel.SetActive(false);
+
+        if (joinPanel != null)
+            joinPanel.SetActive(false);
+
+        if (waitingRoomPanel != null)
+            waitingRoomPanel.SetActive(true);
+
+        if (waitingRoomNameText != null)
+            waitingRoomNameText.text = joinedLobby.Name;
+
+        if (waitingRoomStatusText != null)
+            waitingRoomStatusText.text = "Joined room";
+
+        if (startGameButton != null)
+            startGameButton.gameObject.SetActive(false);
+
+        RefreshPlayers();
+    }
+    catch (System.Exception e)
+    {
+        Debug.LogError("שגיאה בהצטרפות לחדר: " + e);
+    }
+}
+
+ private void RefreshPlayers()
+{
+    if (playersListContent == null || playerItemPrefab == null || joinedLobby == null)
+        return;
+
+    for (int i = playersListContent.childCount - 1; i >= 0; i--)
+    {
+        Destroy(playersListContent.GetChild(i).gameObject);
+    }
+
+    if (joinedLobby.Players == null)
+        return;
+
+    string myPlayerId = AuthenticationService.Instance.PlayerId;
+
+    foreach (var player in joinedLobby.Players)
+    {
+        GameObject obj = Instantiate(playerItemPrefab, playersListContent);
+        PlayerListItem item = obj.GetComponent<PlayerListItem>();
+
+        string playerName = "Player";
+
+        if (player.Data != null &&
+            player.Data.ContainsKey("PlayerName") &&
+            !string.IsNullOrWhiteSpace(player.Data["PlayerName"].Value))
+        {
+            playerName = player.Data["PlayerName"].Value;
+        }
+
+        if (player.Id == myPlayerId)
+        {
+            playerName += " (Me)";
+        }
+
+        if (item != null)
+            item.Setup(playerName);
+    }
+}
 
     public async void LeaveRoom()
     {
