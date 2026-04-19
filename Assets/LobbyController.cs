@@ -153,12 +153,24 @@ public Button saveNameButton;
             HostPanel.SetActive(false);
     }
 
+    public void CloseWaitingRoomPanel()
+    {
+        LeaveRoom();
+    }
+
    public async void FinalCreateGame()
 {
     if (!servicesReady)
     {
         Debug.LogWarning("השירותים עדיין לא מוכנים.");
         return;
+    }
+
+    if (NetworkManager.Singleton != null &&
+        (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsClient))
+    {
+        Debug.LogWarning("כבר מחובר לרשת — יוצאים מהחדר לפני יצירת חדר חדש.");
+        await LeaveRoomAsync();
     }
 
     try
@@ -381,8 +393,8 @@ public Button saveNameButton;
     if (NetworkManager.Singleton != null &&
         (NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsHost))
     {
-        Debug.LogWarning("כבר מחובר לרשת.");
-        return;
+        Debug.LogWarning("כבר מחובר לרשת — יוצאים לפני הצטרפות לחדר.");
+        await LeaveRoomAsync();
     }
 
     try
@@ -518,6 +530,11 @@ public Button saveNameButton;
 }
 
     public async void LeaveRoom()
+    {
+        await LeaveRoomAsync();
+    }
+
+    public async Task LeaveRoomAsync()
     {
         try
         {
