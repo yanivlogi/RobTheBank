@@ -37,8 +37,10 @@ public Button saveNameButton;
     public GameObject HostPanel;
 
     [Header("Settings Fields")]
-    public TMP_InputField pointsInput;
-    public TMP_InputField turnTimeInput;
+    public Slider pointsSlider;
+    public TMP_Text pointsValueText;
+    public Slider turnTimeSlider;
+    public TMP_Text turnTimeValueText;
     public Toggle allowTradeToggle;
 
     private Lobby joinedLobby;
@@ -50,6 +52,30 @@ public Button saveNameButton;
     async void Start()
     {
         HideAllPanelsAtStart();
+        if (pointsSlider != null)
+        {
+            if (pointsValueText != null)
+                pointsValueText.text = Mathf.RoundToInt(pointsSlider.value).ToString();
+            pointsSlider.onValueChanged.AddListener(v =>
+            {
+                if (pointsValueText != null)
+                    pointsValueText.text = Mathf.RoundToInt(v).ToString();
+            });
+        }
+
+        if (turnTimeSlider != null)
+        {
+            float snapped = Mathf.Round(turnTimeSlider.value / 15f) * 15f;
+            if (turnTimeValueText != null)
+                turnTimeValueText.text = Mathf.RoundToInt(snapped) + "s";
+            turnTimeSlider.onValueChanged.AddListener(v =>
+            {
+                float s = Mathf.Round(v / 15f) * 15f;
+                turnTimeSlider.SetValueWithoutNotify(s);
+                if (turnTimeValueText != null)
+                    turnTimeValueText.text = Mathf.RoundToInt(s) + "s";
+            });
+        }
         await InitializeUnityServices();
     }
 
@@ -175,12 +201,12 @@ public Button saveNameButton;
 
     try
     {
-        string maxPoints = pointsInput != null && !string.IsNullOrWhiteSpace(pointsInput.text)
-            ? pointsInput.text
+        string maxPoints = pointsSlider != null
+            ? Mathf.RoundToInt(pointsSlider.value).ToString()
             : "10";
 
-        string turnTime = turnTimeInput != null && !string.IsNullOrWhiteSpace(turnTimeInput.text)
-            ? turnTimeInput.text
+        string turnTime = turnTimeSlider != null
+            ? (Mathf.RoundToInt(turnTimeSlider.value / 15f) * 15).ToString()
             : "60";
 
         string allowTrade = allowTradeToggle != null
