@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Unity.Netcode;
 
-public class BuildManager : MonoBehaviour
+public class BuildManager : NetworkBehaviour
 {
     // הוסף למעלה עם שאר המשתנים הציבוריים
    [Header("Building Settings")]
@@ -201,76 +202,52 @@ private Vector3 FindNearestPoint(Vector3 position, BuildingPoint[] points)
     public void BuildAtCorner(Vector3 position)
     {
         if (!isBuilding) return;
-
-        if (!IsValidBuildingLocation(position))
-        {
-            Debug.Log("Cannot build here - too close to another building!");
-            return;
-        }
-
-        TurnManager turnManager = FindObjectOfType<TurnManager>();
-        int currentPlayer = turnManager.currentPlayer;
-
+        int currentPlayer = TurnManager.instance.currentPlayer;
         if (ResourceManager.instance.CanPlayerBuild(currentPlayer, currentBuildingType))
-        {
-            GameObject building = Instantiate(settlementPrefab, position, Quaternion.identity);
-            Building buildingComponent = building.GetComponent<Building>();
-            buildingComponent.Initialize(currentPlayer, currentBuildingType);
-
-            ResourceManager.instance.PurchaseBuilding(currentPlayer, currentBuildingType);
-            isBuilding = false;
-            Debug.Log($"Building placed at {position}");
-            OnBuildingPlaced();
-        }
+            BuildAtCornerServerRpc(position, currentPlayer, (int)currentBuildingType);
         else
-        {
             Debug.Log("Not enough resources!");
-        }
     }
 
-public void BuildRoad(Vector3 position, float rotation)
-{
-    if (!isBuildingRoad) return;
-
-    TurnManager turnManager = FindObjectOfType<TurnManager>();
-    int currentPlayer = turnManager.currentPlayer;
-
-    Dictionary<string, int> roadCost = new Dictionary<string, int>
+    [ServerRpc(RequireOwnership = false)]
+    private void BuildAtCornerServerRpc(Vector3 position, int playerIndex, int buildingType)
     {
-        {"Wood", 1},
-        {"Brick", 1}
-    };
+        if (!IsValidBuildingLocation(position)) return;
+        var go = Instantiate(settlementPrefab, position, Quaternion.identity);
+        go.GetComponent<NetworkObject>().Spawn(true);
+        go.GetComponent<Building>().Initialize(playerIndex, (Building.BuildingType)buildingType);
+        ResourceManager.instance.PurchaseBuilding(playerIndex, (Building.BuildingType)buildingType);
+        isBuilding = false;
+        OnBuildingPlaced();
+    }
 
-    if (ResourceManager.instance.HasEnoughResources(currentPlayer, roadCost))
+    public void BuildRoad(Vector3 position, float rotation)
     {
-        GameObject road = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
-        SpriteRenderer spriteRenderer = road.GetComponent<SpriteRenderer>();
-        if (spriteRenderer != null)
-        {
-            spriteRenderer.color = GetPlayerColor(currentPlayer);
-        }
-        
-        ResourceManager.instance.SpendResources(currentPlayer, roadCost);
+        if (!isBuildingRoad) return;
+        int currentPlayer = TurnManager.instance.currentPlayer;
+        var roadCost = new Dictionary<string, int> { {"Wood", 1}, {"Brick", 1} };
+        if (ResourceManager.instance.HasEnoughResources(currentPlayer, roadCost))
+            BuildRoadServerRpc(position, rotation, currentPlayer);
+        else
+            Debug.Log("Not enough resources for road!");
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void BuildRoadServerRpc(Vector3 position, float rotation, int playerIndex)
+    {
+        var go = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
+        go.GetComponent<NetworkObject>().Spawn(true);
+        go.GetComponent<Road>().SetOwner(playerIndex);
+        var roadCost = new Dictionary<string, int> { {"Wood", 1}, {"Brick", 1} };
+        ResourceManager.instance.SpendResources(playerIndex, roadCost);
         isBuildingRoad = false;
-        Debug.Log($"Road built at {position} with rotation {rotation}");
     }
-    else
-    {
-        Debug.Log("Not enough resources for road!");
-    }
-}
 
-public void BuildInitialRoad(Vector3 position, float rotation)
-{
-     TurnManager turnManager = FindObjectOfType<TurnManager>();
-    int currentPlayer = turnManager.currentPlayer;
-    GameObject road = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
-    SpriteRenderer spriteRenderer = road.GetComponent<SpriteRenderer>();
-    if (spriteRenderer != null)
+    public void BuildInitialRoad(Vector3 position, float rotation)
     {
-        spriteRenderer.color = GetPlayerColor(currentPlayer);
+        int currentPlayer = TurnManager.instance.currentPlayer;
+        BuildInitialRoadServerRpc(position, rotation, currentPlayer);
     }
-}
 private BuildRoad FindRoadPointAtPosition(Vector3 position)
 {
     float threshold = 0.1f; // מרחק סף לזיהוי נקודת הדרך
@@ -288,22 +265,30 @@ private BuildRoad FindRoadPointAtPosition(Vector3 position)
 
     public void BuildInitialSettlement(Vector3 position, int playerIndex)
     {
-        if (!IsValidBuildingLocation(position))
-        {
-            Debug.Log("Cannot build here - too close to another settlement!");
-            return;
-        }
+        BuildInitialSettlementServerRpc(position, playerIndex);
+    }
 
-        GameObject building = Instantiate(settlementPrefab, position, Quaternion.identity);
-        Building buildingComponent = building.GetComponent<Building>();
-        buildingComponent.Initialize(playerIndex, Building.BuildingType.Settlement);
+    [ServerRpc(RequireOwnership = false)]
+    private void BuildInitialSettlementServerRpc(Vector3 position, int playerIndex)
+    {
+        if (!IsValidBuildingLocation(position)) return;
+        var go = Instantiate(settlementPrefab, position, Quaternion.identity);
+        go.GetComponent<NetworkObject>().Spawn(true);
+        go.GetComponent<Building>().Initialize(playerIndex, Building.BuildingType.Settlement);
         OnBuildingPlaced();
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void BuildInitialRoadServerRpc(Vector3 position, float rotation, int playerIndex)
+    {
+        var go = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
+        go.GetComponent<NetworkObject>().Spawn(true);
+        go.GetComponent<Road>().SetOwner(playerIndex);
     }
 
     public void BuildInitialRoad(Vector3 position, int playerIndex)
     {
-        GameObject road = Instantiate(roadPrefab, position, Quaternion.identity);
-        road.GetComponent<SpriteRenderer>().color = GetPlayerColor(playerIndex);
+        BuildInitialRoadServerRpc(position, 0f, playerIndex);
     }
 
  public bool IsRoadConnectedToSettlement(Vector3 roadPosition, int playerIndex)

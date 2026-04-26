@@ -30,8 +30,9 @@ public class BuildRoad : MonoBehaviour
     private void OnMouseDown()
     {
         TurnManager turnManager = FindObjectOfType<TurnManager>();
-        
-        Debug.Log($"Road point clicked with rotation: {transform.eulerAngles.z}"); 
+        if (!turnManager.IsMyTurn()) return;
+
+        Debug.Log($"Road point clicked with rotation: {transform.eulerAngles.z}");
         if (!canBuild)
         {
             Debug.Log("Cannot build here - point is disabled");

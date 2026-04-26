@@ -11,6 +11,7 @@ using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using UnityEngine.SceneManagement;
 
 public class LobbyController : MonoBehaviour
 {
@@ -31,17 +32,34 @@ public Button saveNameButton;
     public Button startGameButton;
     public Button leaveRoomButton;
 
+    [Header("Waiting Room - Settings Display")]
+    public TMP_Text settingsDisplayText;
+
+    [Header("Waiting Room - Chat")]
+    public WaitingRoomChat waitingRoomChat;
+
     [Header("Panels")]
     public GameObject hostSettingsPanel;
     public GameObject joinPanel;
     public GameObject HostPanel;
 
-    [Header("Settings Fields")]
+    [Header("Error Feedback")]
+    public TMP_Text errorText;
+
+    [Header("Settings Fields - Game Rules")]
     public Slider pointsSlider;
     public TMP_Text pointsValueText;
     public Slider turnTimeSlider;
     public TMP_Text turnTimeValueText;
+    public Toggle friendlyRobberToggle;
     public Toggle allowTradeToggle;
+
+    [Header("Settings Fields - Lobby Settings")]
+    public TMP_InputField roomNameInput;
+    public Toggle privateRoomToggle;
+    public TMP_InputField roomPasswordInput;
+    public Slider maxPlayersSlider;
+    public TMP_Text maxPlayersValueText;
 
     private Lobby joinedLobby;
     private float heartbeatTimer = 0f;
@@ -76,6 +94,20 @@ public Button saveNameButton;
                     turnTimeValueText.text = Mathf.RoundToInt(s) + "s";
             });
         }
+
+        if (maxPlayersSlider != null)
+        {
+            if (maxPlayersValueText != null)
+                maxPlayersValueText.text = Mathf.RoundToInt(maxPlayersSlider.value).ToString();
+            maxPlayersSlider.onValueChanged.AddListener(v =>
+            {
+                int val = Mathf.RoundToInt(v);
+                maxPlayersSlider.SetValueWithoutNotify(val);
+                if (maxPlayersValueText != null)
+                    maxPlayersValueText.text = val.ToString();
+            });
+        }
+
         await InitializeUnityServices();
     }
 
@@ -138,10 +170,30 @@ public Button saveNameButton;
         if (waitingRoomPanel != null)
             waitingRoomPanel.SetActive(false);
     }
+    private void ShowError(string msg)
+    {
+        Debug.LogWarning(msg);
+        if (errorText != null)
+        {
+            errorText.text = msg;
+            errorText.gameObject.SetActive(true);
+        }
+    }
+
+    private void ClearError()
+    {
+        if (errorText != null)
+            errorText.gameObject.SetActive(false);
+    }
+
     private string GetPlayerName()
 {
     if (playerNameInput != null && !string.IsNullOrWhiteSpace(playerNameInput.text))
         return playerNameInput.text.Trim();
+
+    string saved = PlayerPrefs.GetString("SavedPlayerName", "");
+    if (!string.IsNullOrWhiteSpace(saved))
+        return saved;
 
     return "Player";
 }
@@ -186,16 +238,18 @@ public Button saveNameButton;
 
    public async void FinalCreateGame()
 {
+    Debug.Log("=== FinalCreateGame נקרא ===");
+    ClearError();
+
     if (!servicesReady)
     {
-        Debug.LogWarning("השירותים עדיין לא מוכנים.");
+        ShowError("Services not ready. Check internet connection.");
         return;
     }
 
     if (NetworkManager.Singleton != null &&
         (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsClient))
     {
-        Debug.LogWarning("כבר מחובר לרשת — יוצאים מהחדר לפני יצירת חדר חדש.");
         await LeaveRoomAsync();
     }
 
@@ -213,14 +267,32 @@ public Button saveNameButton;
             ? allowTradeToggle.isOn.ToString()
             : "true";
 
+        string friendlyRobber = friendlyRobberToggle != null
+            ? friendlyRobberToggle.isOn.ToString()
+            : "false";
+
+        string roomName = (roomNameInput != null && !string.IsNullOrWhiteSpace(roomNameInput.text))
+            ? roomNameInput.text.Trim()
+            : "Catan Room";
+
+        bool isPrivate = privateRoomToggle != null && privateRoomToggle.isOn;
+
+        string password = (roomPasswordInput != null && !string.IsNullOrWhiteSpace(roomPasswordInput.text))
+            ? roomPasswordInput.text.Trim()
+            : "";
+
+        int maxPlayers = maxPlayersSlider != null
+            ? Mathf.Max(2, Mathf.RoundToInt(maxPlayersSlider.value))
+            : 4;
+
         string playerName = GetPlayerName();
 
-        Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4);
+        Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayers);
         string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
 
         CreateLobbyOptions options = new CreateLobbyOptions
         {
-            IsPrivate = false,
+            IsPrivate = isPrivate,
 
             Player = new Player
             {
@@ -235,11 +307,13 @@ public Button saveNameButton;
                 { "JoinCode", new DataObject(DataObject.VisibilityOptions.Member, joinCode) },
                 { "MaxPoints", new DataObject(DataObject.VisibilityOptions.Public, maxPoints) },
                 { "TurnTime", new DataObject(DataObject.VisibilityOptions.Public, turnTime) },
-                { "AllowTrade", new DataObject(DataObject.VisibilityOptions.Public, allowTrade) }
+                { "AllowTrade", new DataObject(DataObject.VisibilityOptions.Public, allowTrade) },
+                { "FriendlyRobber", new DataObject(DataObject.VisibilityOptions.Public, friendlyRobber) },
+                { "Password", new DataObject(DataObject.VisibilityOptions.Member, password) }
             }
         };
 
-        joinedLobby = await LobbyService.Instance.CreateLobbyAsync("Catan Room", 4, options);
+        joinedLobby = await LobbyService.Instance.CreateLobbyAsync(roomName, maxPlayers, options);
 
         Debug.Log("לובי נוצר בהצלחה!");
         Debug.Log("Lobby ID: " + joinedLobby.Id);
@@ -297,12 +371,15 @@ public Button saveNameButton;
         if (startGameButton != null)
             startGameButton.gameObject.SetActive(true);
 
+        UpdateSettingsDisplay();
+        WaitingRoomChat.Instance?.SetPlayerName(playerName);
         RefreshPlayers();
 
         Debug.Log("המשחק באוויר, מחכה לשחקנים...");
     }
     catch (System.Exception e)
     {
+        ShowError("Failed to create room: " + e.Message);
         Debug.LogError("שגיאה ביצירת משחק: " + e);
     }
 }
@@ -508,12 +585,31 @@ public Button saveNameButton;
         if (startGameButton != null)
             startGameButton.gameObject.SetActive(false);
 
+        UpdateSettingsDisplay();
+        WaitingRoomChat.Instance?.SetPlayerName(playerName);
         RefreshPlayers();
     }
     catch (System.Exception e)
     {
         Debug.LogError("שגיאה בהצטרפות לחדר: " + e);
     }
+}
+
+ private void UpdateSettingsDisplay()
+{
+    if (settingsDisplayText == null || joinedLobby == null) return;
+
+    var d = joinedLobby.Data;
+    string Get(string key) => (d != null && d.ContainsKey(key)) ? d[key].Value : "?";
+
+    string friendlyRobber = Get("FriendlyRobber") == "True" ? "On" : "Off";
+    string allowTrade     = Get("AllowTrade")     == "True" ? "On" : "Off";
+
+    settingsDisplayText.text =
+        $"Points to Win: {Get("MaxPoints")}\n" +
+        $"Turn Time: {Get("TurnTime")}s\n" +
+        $"Friendly Robber: {friendlyRobber}\n" +
+        $"Enable Trade: {allowTrade}";
 }
 
  private void RefreshPlayers()
@@ -608,6 +704,40 @@ public Button saveNameButton;
         }
     }
 
+    public async void ExitGame()
+    {
+        Debug.Log("=== ExitGame נקרא ===");
+        try
+        {
+            if (joinedLobby != null)
+            {
+                string myId = AuthenticationService.Instance.PlayerId;
+                if (joinedLobby.HostId == myId)
+                    await LobbyService.Instance.DeleteLobbyAsync(joinedLobby.Id);
+                else
+                    await LobbyService.Instance.RemovePlayerAsync(joinedLobby.Id, myId);
+                joinedLobby = null;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("Lobby cleanup error: " + e.Message);
+        }
+
+        if (NetworkManager.Singleton != null &&
+            (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsClient))
+            NetworkManager.Singleton.Shutdown();
+
+        GameSettings.Reset();
+        hostSettingsPanel?.SetActive(false);
+        joinPanel?.SetActive(false);
+        waitingRoomPanel?.SetActive(false);
+        ClearError();
+
+        if (SceneManager.GetActiveScene().name != "Online Lobby")
+            SceneManager.LoadScene("Online Lobby");
+    }
+
     public void StartGameFromWaitingRoom()
     {
         if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsHost)
@@ -616,9 +746,27 @@ public Button saveNameButton;
             return;
         }
 
-        Debug.Log("Start Game clicked");
-        // בהמשך:
-        // NetworkManager.Singleton.SceneManager.LoadScene("Main Game", UnityEngine.SceneManagement.LoadSceneMode.Single);
+        if (joinedLobby == null)
+        {
+            Debug.LogWarning("אין לובי פעיל");
+            return;
+        }
+
+        var d = joinedLobby.Data;
+        string Get(string key) => (d != null && d.ContainsKey(key)) ? d[key].Value : "";
+
+        int.TryParse(Get("MaxPoints"), out GameSettings.PointsToWin);
+        int.TryParse(Get("TurnTime"),  out GameSettings.TurnTimeSeconds);
+        bool.TryParse(Get("FriendlyRobber"), out GameSettings.FriendlyRobber);
+        bool.TryParse(Get("AllowTrade"),     out GameSettings.AllowTrade);
+        GameSettings.MaxPlayers   = joinedLobby.Players.Count;
+        GameSettings.RoomName     = joinedLobby.Name;
+        GameSettings.HostPlayerName = GetPlayerName();
+
+        Debug.Log($"Starting game — Points:{GameSettings.PointsToWin} TurnTime:{GameSettings.TurnTimeSeconds}s " +
+                  $"FriendlyRobber:{GameSettings.FriendlyRobber} AllowTrade:{GameSettings.AllowTrade}");
+
+        NetworkManager.Singleton.SceneManager.LoadScene("SampleScene", LoadSceneMode.Single);
     }
 
     private async void HandleLobbyPolling()

@@ -36,13 +36,12 @@ public class BuildingPoint : MonoBehaviour
     private void OnMouseDown()
     {
         TurnManager turnManager = FindObjectOfType<TurnManager>();
-        
+        if (!turnManager.IsMyTurn()) return;
+
         if (turnManager.IsInInitialPhase())
         {
             if (!turnManager.waitingForRoad)
-            {
                 turnManager.PlaceInitialSettlement(transform.position, turnManager.currentPlayer);
-            }
         }
         else if (BuildManager.instance.IsBuilding())
         {

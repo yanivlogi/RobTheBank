@@ -37,7 +37,7 @@ public class NetworkHandler : MonoBehaviour
         if (NetworkManager.Singleton.IsServer)
         {
             // מעביר את כולם יחד לסצנת המשחק
-            NetworkManager.Singleton.SceneManager.LoadScene("MainGame", UnityEngine.SceneManagement.LoadSceneMode.Single);
+            NetworkManager.Singleton.SceneManager.LoadScene("SampleScene", UnityEngine.SceneManagement.LoadSceneMode.Single);
         }
     }
 }

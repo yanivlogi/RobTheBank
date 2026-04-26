@@ -1,35 +1,44 @@
-using System.Collections;
-using System.Collections.Generic;
+using Unity.Netcode;
 using UnityEngine;
 
-public class Building : MonoBehaviour
+public class Building : NetworkBehaviour
 {
-    public int ownerPlayerIndex;
-    public string resourceType;
-    public BuildingType type;
+    private NetworkVariable<int> netOwner = new NetworkVariable<int>(-1);
+    private NetworkVariable<int> netType  = new NetworkVariable<int>(0);
 
-    public enum BuildingType
+    public int ownerPlayerIndex => netOwner.Value;
+    public BuildingType type    => (BuildingType)netType.Value;
+    public string resourceType;
+
+    public enum BuildingType { Settlement, City }
+
+    public override void OnNetworkSpawn()
     {
-        Settlement,
-        City
+        netOwner.OnValueChanged += (_, v) => ApplyColor(v);
+        ApplyColor(netOwner.Value);
     }
 
+    // קרא רק מהשרת
     public void Initialize(int playerIndex, BuildingType buildingType)
     {
-        ownerPlayerIndex = playerIndex;
-        type = buildingType;
-        GetComponent<Renderer>().material.color = GetPlayerColor(playerIndex);
+        if (!IsServer) return;
+        netOwner.Value = playerIndex;
+        netType.Value  = (int)buildingType;
     }
 
-    private Color GetPlayerColor(int playerIndex)
+    private void ApplyColor(int playerIndex)
     {
-        switch(playerIndex)
-        {
-            case 0: return Color.red;
-            case 1: return Color.blue;
-            case 2: return Color.green;
-            case 3: return Color.yellow;
-            default: return Color.white;
-        }
+        if (playerIndex < 0) return;
+        var r = GetComponent<Renderer>();
+        if (r != null) r.material.color = GetPlayerColor(playerIndex);
     }
+
+    public static Color GetPlayerColor(int playerIndex) => playerIndex switch
+    {
+        0 => Color.red,
+        1 => Color.blue,
+        2 => Color.green,
+        3 => Color.yellow,
+        _ => Color.white
+    };
 }
