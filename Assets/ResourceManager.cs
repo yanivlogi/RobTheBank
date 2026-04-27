@@ -43,13 +43,18 @@ public class ResourceManager : NetworkBehaviour
     private void SyncToNet(int playerIndex)
     {
         if (!IsServer || playerResources == null || playerIndex >= playerResources.Length) return;
+
+        // Ensure the list is big enough (defensive init if InitializeForPlayerCount ran before spawn)
+        int needed = playerResources.Length * ResourceOrder.Length;
+        while (netResources.Count < needed)
+            netResources.Add(0);
+
         var res = playerResources[playerIndex].resources;
         int baseSlot = playerIndex * ResourceOrder.Length;
         for (int r = 0; r < ResourceOrder.Length; r++)
         {
             int slot = baseSlot + r;
-            if (slot < netResources.Count)
-                netResources[slot] = res.ContainsKey(ResourceOrder[r]) ? res[ResourceOrder[r]] : 0;
+            netResources[slot] = res.ContainsKey(ResourceOrder[r]) ? res[ResourceOrder[r]] : 0;
         }
     }
 
@@ -76,6 +81,7 @@ public class ResourceManager : NetworkBehaviour
 
     private void DistributeResourcesFromTile(HexTile tile)
     {
+        Debug.Log($"[Distribute] Tile '{tile.gameObject.name}' pos={tile.transform.position} resource={tile.resourceType} number={tile.resourceNumber}");
         CheckBuildPoint(tile.buildTL, tile.resourceType, "buildTL");
         CheckBuildPoint(tile.buildT,  tile.resourceType, "buildT");
         CheckBuildPoint(tile.buildTR, tile.resourceType, "buildTR");
@@ -88,14 +94,13 @@ public class ResourceManager : NetworkBehaviour
     {
         if (buildPoint == null) return;
 
-        Building building = buildPoint.GetComponent<Building>();
-        if (building == null)
+        Building building = null;
+        foreach (Building b in FindObjectsOfType<Building>())
         {
-            Collider2D[] colliders = Physics2D.OverlapCircleAll(buildPoint.position, 0.2f);
-            foreach (Collider2D c in colliders)
+            if (Vector3.Distance(buildPoint.position, b.transform.position) <= 0.5f)
             {
-                building = c.GetComponent<Building>();
-                if (building != null) break;
+                building = b;
+                break;
             }
         }
         if (building == null) return;
@@ -191,6 +196,19 @@ public class ResourceManager : NetworkBehaviour
             return result;
         }
         return "Invalid player";
+    }
+
+    // On server/host: reads from playerResources (always up to date).
+    // On client: reads from the network-synced list.
+    public string GetNetResourcesString(int playerIndex)
+    {
+        if (IsServer && playerResources != null && playerIndex < playerResources.Length)
+            return GetPlayerResourcesString(playerIndex);
+
+        string result = "";
+        for (int r = 0; r < ResourceOrder.Length; r++)
+            result += $"{ResourceOrder[r]}: {GetNetResource(playerIndex, r)}\n";
+        return result;
     }
 }
 

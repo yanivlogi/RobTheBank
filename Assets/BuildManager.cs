@@ -28,7 +28,9 @@ public float roadConnectionDistance = 1.5f;  // הגדלת המרחק האפשר
             Destroy(gameObject);
     }
 
-    void Start()
+    void Start() { }  // deferred — called by HexGridGenerator after building points are created
+
+    public void RefreshBuildPoints()
     {
         allBuildPoints = FindObjectsOfType<BuildingPoint>().ToList();
         UpdateValidBuildingPoints();

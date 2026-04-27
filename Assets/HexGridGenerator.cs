@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using TMPro;
 
 public class HexGridGenerator : MonoBehaviour
 {
@@ -33,14 +34,24 @@ public class HexGridGenerator : MonoBehaviour
     public GameObject buildPointPrefab;  
     public GameObject roadPointPrefab;   
 
+    public static HexGridGenerator instance;
+
     private List<GameObject> hexTiles = new List<GameObject>();
     private List<Vector2Int> hexCoordinates = new List<Vector2Int>();
 
-    void Start()
+    void Awake()
+    {
+        instance = this;
+    }
+
+    void Start() { }  // generation deferred until TurnManager broadcasts the seed
+
+    public void InitializeWithSeed(int seed)
     {
         GenerateHexGrid();
-        AssignResourcesAndNumbers();
+        AssignResourcesAndNumbers(seed);
         SetupBuildingPoints();
+        BuildManager.instance?.RefreshBuildPoints();
     }
 
     void GenerateHexGrid()
@@ -211,15 +222,16 @@ private void CreateRoadPoints(Transform parent)
         return count;
     }
 
-void AssignResourcesAndNumbers()
+void AssignResourcesAndNumbers(int seed)
 {
+    var rng = new System.Random(seed);
     int hexCount = hexTiles.Count;
     List<string> resourcesToAssign = BuildResourceListForHexCount(hexCount);
-    resourcesToAssign.Shuffle();
+    resourcesToAssign.Shuffle(rng);
     ScatterResources(resourcesToAssign);
 
     List<int> shuffledNumbers = new List<int>(possibleNumbers);
-    shuffledNumbers.Shuffle();
+    shuffledNumbers.Shuffle(rng);
 
     int resourceIndex = 0;
     int numberIndex = 0;
@@ -256,19 +268,35 @@ void AssignResourcesAndNumbers()
         }
         else
         {
+            int number = 0;
             if (numberIndex < shuffledNumbers.Count)
             {
-                int number = shuffledNumbers[numberIndex];
+                number = shuffledNumbers[numberIndex];
                 numberIndex++;
-                hexTile.InitializeTile(number, resource);
             }
-            else
-            {
-                hexTile.InitializeTile(0, resource);
-            }
+            hexTile.InitializeTile(number, resource);
             spriteRenderer.sprite = GetResourceSprite(resource);
+            if (number > 0)
+                CreateNumberLabel(hex.transform, number);
         }
     }
+}
+
+private void CreateNumberLabel(Transform hexTransform, int number)
+{
+    GameObject labelObj = new GameObject("NumberLabel");
+    labelObj.transform.SetParent(hexTransform, false);
+    labelObj.transform.localPosition = new Vector3(0, 0, -0.1f);
+
+    TextMeshPro tmp = labelObj.AddComponent<TextMeshPro>();
+    tmp.text = number.ToString();
+    tmp.fontSize = hexSize * 3.5f;
+    tmp.fontStyle = FontStyles.Bold;
+    tmp.alignment = TextAlignmentOptions.Center;
+    tmp.color = (number == 6 || number == 8) ? new Color(0.85f, 0.1f, 0.1f) : Color.white;
+
+    RectTransform rt = labelObj.GetComponent<RectTransform>();
+    rt.sizeDelta = new Vector2(hexSize * 2f, hexSize * 1.2f);
 }
 
 

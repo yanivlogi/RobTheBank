@@ -76,7 +76,12 @@ public class TurnManager : NetworkBehaviour
         }
 
         ApplySettings();
-        ResourceManager.instance?.InitializeForPlayerCount(totalPlayers);
+
+        if (IsServer)
+        {
+            int mapSeed = UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+            BroadcastMapSeedClientRpc(mapSeed);
+        }
 
         // Setting changes
         netTotalPlayers.OnValueChanged    += (_, v) => { totalPlayers    = v; };
@@ -89,6 +94,14 @@ public class TurnManager : NetworkBehaviour
         netCurrentPlayer.OnValueChanged += (_, v) => onPlayerTurnChanged?.Invoke(v);
 
         Debug.Log($"[TurnManager] Spawned — totalPlayers:{totalPlayers} myIndex:{PlayerManager.LocalPlayerIndex}");
+    }
+
+    [ClientRpc]
+    private void BroadcastMapSeedClientRpc(int seed)
+    {
+        HexGridGenerator.instance?.InitializeWithSeed(seed);
+        ResourceManager.instance?.InitializeForPlayerCount(totalPlayers);
+        Debug.Log($"[TurnManager] Map initialized with seed {seed}");
     }
 
     private void ApplySettings()
@@ -239,9 +252,10 @@ public class TurnManager : NetworkBehaviour
     public void NextTurn()
     {
         if (!IsMyTurn()) { Debug.LogWarning("Not your turn!"); return; }
-        if (currentState != TurnState.TurnEnd)
+        if (currentState == TurnState.WaitingForSettlement ||
+            currentState == TurnState.WaitingForDiceRoll)
         {
-            Debug.LogWarning("Cannot end turn before completing all actions!");
+            Debug.LogWarning("Must roll dice before ending turn!");
             return;
         }
         NextTurnServerRpc();
@@ -250,7 +264,9 @@ public class TurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void NextTurnServerRpc()
     {
-        if (netCurrentState.Value != (int)TurnState.TurnEnd) return;
+        if (netCurrentState.Value == (int)TurnState.WaitingForSettlement ||
+            netCurrentState.Value == (int)TurnState.WaitingForDiceRoll)
+            return;
         AdvanceTurn();
     }
 
@@ -259,7 +275,7 @@ public class TurnManager : NetworkBehaviour
         StopTurnTimerOnAllClients();
         netCurrentPlayer.Value = (netCurrentPlayer.Value + 1) % totalPlayers;
         netCurrentState.Value  = (int)TurnState.WaitingForDiceRoll;
-        StartTurnTimerOnAllClients();
+        // Timer starts only after dice roll, not here
         Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn");
     }
 
@@ -280,6 +296,7 @@ public class TurnManager : NetworkBehaviour
         int total = dice1 + dice2;
 
         BroadcastDiceResultClientRpc(dice1, dice2, total);
+        StartTurnTimerOnAllClients();  // timer begins when dice are rolled
 
         if (total == 7)
             HandleRobber();

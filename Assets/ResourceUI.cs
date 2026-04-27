@@ -1,21 +1,16 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
 public class ResourceUI : MonoBehaviour
 {
-  public TextMeshProUGUI[] playerResourceTexts;
-    
+    [Header("Shows only the local player's resources")]
+    public TextMeshProUGUI myResourcesText;
+
     void Update()
     {
-        if (ResourceManager.instance != null)
-        {
-            for (int i = 0; i < playerResourceTexts.Length; i++)
-            {
-                playerResourceTexts[i].text = $"Player {i + 1}:\n" + 
-                    ResourceManager.instance.GetPlayerResourcesString(i);
-            }
-        }
+        if (ResourceManager.instance == null || myResourcesText == null) return;
+        int myIndex = PlayerManager.LocalPlayerIndex;
+        if (myIndex < 0) return;
+        myResourcesText.text = ResourceManager.instance.GetNetResourcesString(myIndex);
     }
 }

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 using TMPro;
 
 public class GameUI : MonoBehaviour
@@ -11,6 +12,9 @@ public class GameUI : MonoBehaviour
     [Header("Player Panels (one per player slot, in order)")]
     public TMP_Text[] playerNameTexts;
     public TMP_Text[] playerPointsTexts;
+    public Image[] playerAvatarImages;
+
+    private readonly Sprite[] cachedAvatars = new Sprite[8];
 
     void Start()
     {
@@ -58,7 +62,8 @@ public class GameUI : MonoBehaviour
         int idx = TurnManager.instance.currentPlayer;
         string name = GetName(idx);
         bool isMe   = PlayerManager.LocalPlayerIndex == idx;
-        currentPlayerText.text = $"Current: {name}{(isMe ? " (You)" : "")}";
+        currentPlayerText.text  = $"Current: {name}{(isMe ? " (You)" : "")}";
+        currentPlayerText.color = Building.GetPlayerColor(idx);
     }
 
     private void RefreshPlayerPanels()
@@ -69,7 +74,8 @@ public class GameUI : MonoBehaviour
             if (playerNameTexts[i] == null) continue;
             if (i < playerCount)
             {
-                playerNameTexts[i].text = GetName(i) + (PlayerManager.LocalPlayerIndex == i ? " (You)" : "");
+                playerNameTexts[i].text  = GetName(i) + (PlayerManager.LocalPlayerIndex == i ? " (You)" : "");
+                playerNameTexts[i].color = Building.GetPlayerColor(i);
             }
             else
             {
@@ -81,6 +87,25 @@ public class GameUI : MonoBehaviour
         {
             if (playerPointsTexts[i] == null) continue;
             playerPointsTexts[i].text = i < playerCount ? $"{GetVictoryPoints(i)} pts" : "";
+        }
+
+        if (playerAvatarImages != null && PlayerManager.instance != null)
+        {
+            for (int i = 0; i < playerAvatarImages.Length; i++)
+            {
+                if (playerAvatarImages[i] == null) continue;
+                if (i >= playerCount) { playerAvatarImages[i].enabled = false; continue; }
+
+                playerAvatarImages[i].enabled = true;
+                if (cachedAvatars[i] == null)
+                {
+                    string avatarName = PlayerManager.instance.GetPlayerAvatarName(i);
+                    if (!string.IsNullOrEmpty(avatarName))
+                        cachedAvatars[i] = Resources.Load<Sprite>("Avatars/" + avatarName);
+                }
+                if (cachedAvatars[i] != null)
+                    playerAvatarImages[i].sprite = cachedAvatars[i];
+            }
         }
     }
 

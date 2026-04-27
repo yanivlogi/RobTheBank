@@ -11,36 +11,39 @@ public class PlayerManager : NetworkBehaviour
     private readonly Dictionary<ulong, int> clientIndexMap = new();
     private int nextPlayerIndex = 0;
 
-    // Synced player names readable by all clients
+    // Synced player names and avatar names readable by all clients
     public NetworkList<FixedString64Bytes> playerNames;
+    public NetworkList<FixedString64Bytes> playerAvatarNames;
 
     void Awake()
     {
         instance = this;
         playerNames = new NetworkList<FixedString64Bytes>();
+        playerAvatarNames = new NetworkList<FixedString64Bytes>();
     }
 
     public override void OnNetworkSpawn()
     {
         if (IsServer)
         {
-            // Host is always player 0
-            RegisterClient(NetworkManager.Singleton.LocalClientId, GameSettings.HostPlayerName);
+            string avatarName = PlayerPrefs.GetString("SavedAvatarName", "");
+            RegisterClient(NetworkManager.Singleton.LocalClientId, GameSettings.HostPlayerName, avatarName);
             LocalPlayerIndex = 0;
         }
         else
         {
             string name = PlayerPrefs.GetString("SavedPlayerName", "Player");
-            RequestPlayerIndexServerRpc(name);
+            string avatarName = PlayerPrefs.GetString("SavedAvatarName", "");
+            RequestPlayerIndexServerRpc(name, avatarName);
         }
     }
 
     [ServerRpc(RequireOwnership = false)]
-    private void RequestPlayerIndexServerRpc(string playerName, ServerRpcParams rpcParams = default)
+    private void RequestPlayerIndexServerRpc(string playerName, string avatarName, ServerRpcParams rpcParams = default)
     {
         ulong clientId = rpcParams.Receive.SenderClientId;
         if (!clientIndexMap.ContainsKey(clientId))
-            RegisterClient(clientId, playerName);
+            RegisterClient(clientId, playerName, avatarName);
 
         int index = clientIndexMap[clientId];
         AssignIndexClientRpc(index, new ClientRpcParams
@@ -49,12 +52,13 @@ public class PlayerManager : NetworkBehaviour
         });
     }
 
-    private void RegisterClient(ulong clientId, string name)
+    private void RegisterClient(ulong clientId, string name, string avatarName)
     {
         clientIndexMap[clientId] = nextPlayerIndex;
         playerNames.Add(new FixedString64Bytes(name));
+        playerAvatarNames.Add(new FixedString64Bytes(avatarName));
         nextPlayerIndex++;
-        Debug.Log($"[PlayerManager] Registered {name} as player {nextPlayerIndex - 1}");
+        Debug.Log($"[PlayerManager] Registered {name} (avatar: {avatarName}) as player {nextPlayerIndex - 1}");
     }
 
     [ClientRpc]
@@ -69,5 +73,12 @@ public class PlayerManager : NetworkBehaviour
         if (playerIndex >= 0 && playerIndex < playerNames.Count)
             return playerNames[playerIndex].ToString();
         return $"Player {playerIndex + 1}";
+    }
+
+    public string GetPlayerAvatarName(int playerIndex)
+    {
+        if (playerIndex >= 0 && playerIndex < playerAvatarNames.Count)
+            return playerAvatarNames[playerIndex].ToString();
+        return "";
     }
 }

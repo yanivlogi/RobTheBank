@@ -6,7 +6,11 @@ public static class ListExtensions
 {
     public static void Shuffle<T>(this IList<T> list)
     {
-        System.Random rng = new System.Random();
+        list.Shuffle(new System.Random());
+    }
+
+    public static void Shuffle<T>(this IList<T> list, System.Random rng)
+    {
         int n = list.Count;
         while (n > 1)
         {
