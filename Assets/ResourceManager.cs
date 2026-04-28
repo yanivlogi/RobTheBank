@@ -23,6 +23,12 @@ public class ResourceManager : NetworkBehaviour
             NetworkVariableWritePermission.Server);
     }
 
+    void OnDestroy()
+    {
+        if (instance == this) instance = null;
+        netResources?.Dispose();
+    }
+
     public void InitializeForPlayerCount(int count)
     {
         playerResources = new PlayerResources[count];
@@ -153,6 +159,48 @@ public class ResourceManager : NetworkBehaviour
         }
         Debug.Log($"Player {playerIndex} cannot afford {buildingType}");
         return false;
+    }
+
+    public int GetResourceAmountServer(int playerIndex, string resourceType)
+    {
+        if (!IsServer || playerResources == null || playerIndex >= playerResources.Length) return 0;
+        var res = playerResources[playerIndex].resources;
+        return res.ContainsKey(resourceType) ? res[resourceType] : 0;
+    }
+
+    public void AddResource(int playerIndex, string resourceType, int amount)
+    {
+        if (!IsServer) return;
+        if (playerIndex >= 0 && playerIndex < playerResources?.Length)
+        {
+            playerResources[playerIndex].AddResource(resourceType, amount);
+            SyncToNet(playerIndex);
+        }
+    }
+
+    public bool RemoveResource(int playerIndex, string resourceType, int amount)
+    {
+        if (!IsServer) return false;
+        if (playerIndex < 0 || playerIndex >= playerResources?.Length) return false;
+        var res = playerResources[playerIndex].resources;
+        if (!res.ContainsKey(resourceType) || res[resourceType] < amount) return false;
+        res[resourceType] -= amount;
+        SyncToNet(playerIndex);
+        return true;
+    }
+
+    public int GetTotalResourceCount(int playerIndex)
+    {
+        if (IsServer && playerResources != null && playerIndex < playerResources.Length)
+        {
+            int total = 0;
+            foreach (var kv in playerResources[playerIndex].resources) total += kv.Value;
+            return total;
+        }
+        int netTotal = 0;
+        for (int r = 0; r < ResourceOrder.Length; r++)
+            netTotal += GetNetResource(playerIndex, r);
+        return netTotal;
     }
 
     public void AddTestResources(int playerIndex)

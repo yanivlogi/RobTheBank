@@ -25,10 +25,36 @@ public class HexTile : MonoBehaviour
     public void InitializeTile(int number, string type)
     {
         resourceNumber = number;
-        resourceType = type;
+        resourceType   = type;
         InitializeBuildingPoints();
         InitializeRoadPoints();
-        Debug.Log($"Tile: {name}, Resource: {resourceType}, Number: {resourceNumber}");
+        EnsureCollider();
+    }
+
+    private void EnsureCollider()
+    {
+        if (GetComponent<Collider2D>() == null)
+        {
+            var col = gameObject.AddComponent<PolygonCollider2D>();
+            // hexagon shape (pointy-top) normalised to the SpriteRenderer bounds
+            var sr = GetComponent<SpriteRenderer>();
+            float r = sr != null ? sr.bounds.extents.x * 0.9f : 0.9f;
+            col.SetPath(0, new Vector2[]
+            {
+                new Vector2(0,       r),
+                new Vector2(r*0.866f, r*0.5f),
+                new Vector2(r*0.866f,-r*0.5f),
+                new Vector2(0,      -r),
+                new Vector2(-r*0.866f,-r*0.5f),
+                new Vector2(-r*0.866f, r*0.5f),
+            });
+        }
+    }
+
+    private void OnMouseDown()
+    {
+        if (RobberManager.instance != null && RobberManager.instance.IsMyRobberTurn)
+            RobberManager.instance.PlaceRobberOnHexServerRpc(transform.position);
     }
 
     private void InitializeBuildingPoints()

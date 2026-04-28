@@ -25,6 +25,8 @@ public class BuildRoad : MonoBehaviour
             color.a = isVisible ? 1f : 0f;
             spriteRenderer.color = color;
         }
+        var col = GetComponent<Collider2D>();
+        if (col != null) col.enabled = isVisible;
     }
 
     private void OnMouseDown()
@@ -55,16 +57,11 @@ public class BuildRoad : MonoBehaviour
 
         if (BuildManager.instance.IsBuildingRoad() && canBuild)
         {
-            int currentPlayer = turnManager.currentPlayer;
-            if (ResourceManager.instance.HasEnoughResources(currentPlayer, roadCost))
-            {
-                // העבר את הרוטציה גם כאן
-                BuildManager.instance.BuildRoad(transform.position, transform.eulerAngles.z);
-            }
-            else
-            {
-                Debug.Log("Not enough resources to build road!");
-            }
+            // בדיקה שאין כבר דרך באותו מיקום
+            foreach (Road r in FindObjectsOfType<Road>())
+                if (Vector3.Distance(r.transform.position, transform.position) <= 0.25f) return;
+
+            BuildManager.instance.BuildRoad(transform.position, transform.eulerAngles.z);
         }
     }
 }

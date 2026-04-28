@@ -22,6 +22,13 @@ public class PlayerManager : NetworkBehaviour
         playerAvatarNames = new NetworkList<FixedString64Bytes>();
     }
 
+    void OnDestroy()
+    {
+        if (instance == this) instance = null;
+        playerNames?.Dispose();
+        playerAvatarNames?.Dispose();
+    }
+
     public override void OnNetworkSpawn()
     {
         if (IsServer)
@@ -80,5 +87,13 @@ public class PlayerManager : NetworkBehaviour
         if (playerIndex >= 0 && playerIndex < playerAvatarNames.Count)
             return playerAvatarNames[playerIndex].ToString();
         return "";
+    }
+
+    public bool IsPlayerConnected(int playerIndex)
+    {
+        foreach (var kv in clientIndexMap)
+            if (kv.Value == playerIndex)
+                return NetworkManager.Singleton.ConnectedClients.ContainsKey(kv.Key);
+        return true; // not yet registered = still joining, treat as connected
     }
 }

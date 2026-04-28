@@ -6,37 +6,43 @@ public class TurnManager : NetworkBehaviour
 {
     public static TurnManager instance;
 
-    // Game settings — synced from host
+    // ── Game settings — server writes, everyone reads ──
     private NetworkVariable<int>  netTotalPlayers    = new NetworkVariable<int>(4);
     private NetworkVariable<int>  netPointsToWin     = new NetworkVariable<int>(10);
     private NetworkVariable<int>  netTurnTimeSeconds = new NetworkVariable<int>(60);
     private NetworkVariable<bool> netFriendlyRobber  = new NetworkVariable<bool>(false);
     private NetworkVariable<bool> netAllowTrade      = new NetworkVariable<bool>(true);
 
-    // Turn state — synced, server-write-only
-    private NetworkVariable<int>  netCurrentPlayer     = new NetworkVariable<int>(0,  NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<int>  netCurrentState      = new NetworkVariable<int>(0,  NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    // ── Turn state — server writes ──
+    private NetworkVariable<int>  netCurrentPlayer      = new NetworkVariable<int>(0,  NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<int>  netCurrentState       = new NetworkVariable<int>(0,  NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private NetworkVariable<bool> netIsInitialPlacement = new NetworkVariable<bool>(true, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<bool> netWaitingForRoad    = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<bool> netWaitingForRoad     = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    // Local copies of settings for convenient read
+    // ── Bonus tracking — server writes ──
+    private NetworkVariable<int> netLongestRoadPlayer = new NetworkVariable<int>(-1, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<int> netLargestArmyPlayer = new NetworkVariable<int>(-1, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+    // ── Local copies of settings ──
     public int  totalPlayers    { get; private set; } = 4;
     public int  pointsToWin     { get; private set; } = 10;
     public int  turnTimeSeconds { get; private set; } = 60;
     public bool friendlyRobber  { get; private set; } = false;
     public bool allowTrade      { get; private set; } = true;
 
-    // Synced accessors
+    // ── Synced accessors ──
     public int       currentPlayer     => netCurrentPlayer.Value;
     public TurnState currentState      => (TurnState)netCurrentState.Value;
     public bool      isInitialPlacement => netIsInitialPlacement.Value;
     public bool      waitingForRoad    => netWaitingForRoad.Value;
+    public int       longestRoadPlayer => netLongestRoadPlayer.Value;
+    public int       largestArmyPlayer => netLargestArmyPlayer.Value;
 
-    // Timer — runs locally on each client for smooth display; only server acts on expiry
+    // ── Timer ──
     private float turnTimeRemaining = 0f;
     private bool  turnTimerActive   = false;
 
-    // Server-only counter
+    // ── Server counters ──
     private int initialSettlementsPlaced = 0;
 
     public UnityEvent<int>   onPlayerTurnChanged;
@@ -59,6 +65,22 @@ public class TurnManager : NetworkBehaviour
         else Destroy(gameObject);
     }
 
+    void OnDestroy()
+    {
+        if (instance == this) instance = null;
+        netTotalPlayers?.Dispose();
+        netPointsToWin?.Dispose();
+        netTurnTimeSeconds?.Dispose();
+        netFriendlyRobber?.Dispose();
+        netAllowTrade?.Dispose();
+        netCurrentPlayer?.Dispose();
+        netCurrentState?.Dispose();
+        netIsInitialPlacement?.Dispose();
+        netWaitingForRoad?.Dispose();
+        netLongestRoadPlayer?.Dispose();
+        netLargestArmyPlayer?.Dispose();
+    }
+
     public override void OnNetworkSpawn()
     {
         if (IsServer)
@@ -73,6 +95,8 @@ public class TurnManager : NetworkBehaviour
             netCurrentState.Value       = (int)TurnState.WaitingForSettlement;
             netIsInitialPlacement.Value = true;
             netWaitingForRoad.Value     = false;
+            netLongestRoadPlayer.Value  = -1;
+            netLargestArmyPlayer.Value  = -1;
         }
 
         ApplySettings();
@@ -83,15 +107,12 @@ public class TurnManager : NetworkBehaviour
             BroadcastMapSeedClientRpc(mapSeed);
         }
 
-        // Setting changes
         netTotalPlayers.OnValueChanged    += (_, v) => { totalPlayers    = v; };
         netPointsToWin.OnValueChanged     += (_, v) => { pointsToWin     = v; };
         netTurnTimeSeconds.OnValueChanged += (_, v) => { turnTimeSeconds = v; };
         netFriendlyRobber.OnValueChanged  += (_, v) => { friendlyRobber  = v; };
         netAllowTrade.OnValueChanged      += (_, v) => { allowTrade      = v; };
-
-        // Game state changes fire events locally on every client
-        netCurrentPlayer.OnValueChanged += (_, v) => onPlayerTurnChanged?.Invoke(v);
+        netCurrentPlayer.OnValueChanged   += (_, v) => onPlayerTurnChanged?.Invoke(v);
 
         Debug.Log($"[TurnManager] Spawned — totalPlayers:{totalPlayers} myIndex:{PlayerManager.LocalPlayerIndex}");
     }
@@ -101,6 +122,9 @@ public class TurnManager : NetworkBehaviour
     {
         HexGridGenerator.instance?.InitializeWithSeed(seed);
         ResourceManager.instance?.InitializeForPlayerCount(totalPlayers);
+        DevCardManager.instance?.InitializeForPlayerCount(totalPlayers);
+        RobberManager.instance?.PlaceOnDesert();
+        BuildManager.instance?.ShowValidBuildPoints(); // הצג נקודות לשחקן הראשון
         Debug.Log($"[TurnManager] Map initialized with seed {seed}");
     }
 
@@ -120,12 +144,11 @@ public class TurnManager : NetworkBehaviour
         turnTimeRemaining -= Time.deltaTime;
         onTurnTimerTick?.Invoke(turnTimeRemaining);
 
-        // Only the server actually enforces the timeout
         if (IsServer && turnTimeRemaining <= 0f)
             ForceEndTurn();
     }
 
-    // ── Timer helpers (broadcast so all clients animate the same countdown) ──
+    // ── Timer helpers ──
 
     private void StartTurnTimerOnAllClients()
     {
@@ -140,10 +163,7 @@ public class TurnManager : NetworkBehaviour
         turnTimerActive   = true;
     }
 
-    private void StopTurnTimerOnAllClients()
-    {
-        StopTurnTimerClientRpc();
-    }
+    private void StopTurnTimerOnAllClients() => StopTurnTimerClientRpc();
 
     [ClientRpc]
     private void StopTurnTimerClientRpc()
@@ -181,13 +201,42 @@ public class TurnManager : NetworkBehaviour
         BuildManager.instance.BuildInitialSettlement(position, netCurrentPlayer.Value);
         netWaitingForRoad.Value = true;
         HighlightRoadPointsClientRpc(position, netCurrentPlayer.Value);
+
+        // ישוב שני — נותן משאב אחד מכל אריח סמוך
+        if (initialSettlementsPlaced >= totalPlayers)
+            GiveStartingResources(position, netCurrentPlayer.Value);
+    }
+
+    private void GiveStartingResources(Vector3 settlementPos, int playerIndex)
+    {
+        foreach (HexTile tile in FindObjectsOfType<HexTile>())
+        {
+            if (string.IsNullOrEmpty(tile.resourceType) || tile.resourceType == "Desert") continue;
+            Transform[] pts = { tile.buildT, tile.buildTR, tile.buildTL, tile.buildD, tile.buildDR, tile.buildDL };
+            foreach (var bp in pts)
+            {
+                if (bp != null && Vector3.Distance(bp.position, settlementPos) <= 0.5f)
+                {
+                    ResourceManager.instance?.AddResource(playerIndex, tile.resourceType, 1);
+                    NotifyStartingResourceClientRpc(playerIndex, tile.resourceType);
+                    break;
+                }
+            }
+        }
+    }
+
+    [ClientRpc]
+    private void NotifyStartingResourceClientRpc(int playerIndex, string resource)
+    {
+        if (PlayerManager.LocalPlayerIndex == playerIndex)
+            Debug.Log($"[Start] +1 {resource} from starting settlement");
     }
 
     [ClientRpc]
     private void HighlightRoadPointsClientRpc(Vector3 settlementPos, int playerIdx)
     {
         HighlightValidRoadPoints(settlementPos);
-        Debug.Log($"Player {playerIdx + 1} — now place a road connected to your settlement");
+        Debug.Log($"Player {playerIdx + 1} — place a road connected to your settlement");
     }
 
     private void HighlightValidRoadPoints(Vector3 settlementPosition)
@@ -203,19 +252,13 @@ public class TurnManager : NetworkBehaviour
     }
 
     [ClientRpc]
-    private void HideAllRoadPointsClientRpc()
-    {
-        HideAllRoadPoints();
-    }
+    private void HideAllRoadPointsClientRpc() => HideAllRoadPoints();
 
     public void PlaceInitialRoad(Vector3 position, float rotation)
     {
         if (!netWaitingForRoad.Value || !IsMyTurn()) return;
         if (!BuildManager.instance.IsRoadConnectedToSettlement(position, currentPlayer))
-        {
-            Debug.Log("Road must be connected to your settlement!");
-            return;
-        }
+        { Debug.Log("Road must be connected to your settlement!"); return; }
         PlaceInitialRoadServerRpc(position, rotation);
     }
 
@@ -223,10 +266,7 @@ public class TurnManager : NetworkBehaviour
     private void PlaceInitialRoadServerRpc(Vector3 position, float rotation)
     {
         if (!BuildManager.instance.IsRoadConnectedToSettlement(position, netCurrentPlayer.Value))
-        {
-            Debug.LogWarning("Server: road rejected — not connected");
-            return;
-        }
+        { Debug.LogWarning("Server: road rejected — not connected"); return; }
 
         BuildManager.instance.BuildInitialRoad(position, rotation);
         netWaitingForRoad.Value = false;
@@ -240,11 +280,32 @@ public class TurnManager : NetworkBehaviour
             netCurrentState.Value = (int)TurnState.WaitingForDiceRoll;
             Debug.Log("Initial placement complete — game starting!");
         }
+        else if (initialSettlementsPlaced < totalPlayers)
+        {
+            // סיבוב ראשון — קדימה
+            netCurrentPlayer.Value = netCurrentPlayer.Value + 1;
+            Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn (round 1)");
+            ShowBuildPointsForInitialPlacementClientRpc();
+        }
+        else if (initialSettlementsPlaced == totalPlayers)
+        {
+            // ציר הנחש — אותו שחקן (האחרון) שם ישוב שני מיד
+            Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn (round 2, pivot)");
+            ShowBuildPointsForInitialPlacementClientRpc();
+        }
         else
         {
-            netCurrentPlayer.Value = (netCurrentPlayer.Value + 1) % totalPlayers;
-            Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn to place settlement");
+            // סיבוב שני — אחורה
+            netCurrentPlayer.Value = netCurrentPlayer.Value - 1;
+            Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn (round 2)");
+            ShowBuildPointsForInitialPlacementClientRpc();
         }
+    }
+
+    [ClientRpc]
+    private void ShowBuildPointsForInitialPlacementClientRpc()
+    {
+        BuildManager.instance?.ShowValidBuildPoints();
     }
 
     // ── Normal turn ──
@@ -254,10 +315,7 @@ public class TurnManager : NetworkBehaviour
         if (!IsMyTurn()) { Debug.LogWarning("Not your turn!"); return; }
         if (currentState == TurnState.WaitingForSettlement ||
             currentState == TurnState.WaitingForDiceRoll)
-        {
-            Debug.LogWarning("Must roll dice before ending turn!");
-            return;
-        }
+        { Debug.LogWarning("Must roll dice before ending turn!"); return; }
         NextTurnServerRpc();
     }
 
@@ -265,24 +323,35 @@ public class TurnManager : NetworkBehaviour
     private void NextTurnServerRpc()
     {
         if (netCurrentState.Value == (int)TurnState.WaitingForSettlement ||
-            netCurrentState.Value == (int)TurnState.WaitingForDiceRoll)
-            return;
+            netCurrentState.Value == (int)TurnState.WaitingForDiceRoll) return;
         AdvanceTurn();
     }
 
     private void AdvanceTurn()
     {
+        if (VictoryManager.instance != null && VictoryManager.instance.IsGameOver) return;
+
         StopTurnTimerOnAllClients();
-        netCurrentPlayer.Value = (netCurrentPlayer.Value + 1) % totalPlayers;
+
+        int next = (netCurrentPlayer.Value + 1) % totalPlayers;
+        // Skip disconnected players (up to a full cycle)
+        for (int attempt = 0; attempt < totalPlayers; attempt++)
+        {
+            if (PlayerManager.instance == null || PlayerManager.instance.IsPlayerConnected(next))
+                break;
+            next = (next + 1) % totalPlayers;
+        }
+
+        netCurrentPlayer.Value = next;
         netCurrentState.Value  = (int)TurnState.WaitingForDiceRoll;
-        // Timer starts only after dice roll, not here
+        BuildManager.instance?.CancelBuildingClientRpc();
         Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn");
     }
 
     public void RollDice()
     {
         if (!IsMyTurn()) { Debug.LogWarning("Not your turn!"); return; }
-        if (currentState != TurnState.WaitingForDiceRoll) { Debug.LogWarning("Can only roll dice at the start of your turn!"); return; }
+        if (currentState != TurnState.WaitingForDiceRoll) { Debug.LogWarning("Can only roll dice at start of turn!"); return; }
         RollDiceServerRpc();
     }
 
@@ -291,17 +360,17 @@ public class TurnManager : NetworkBehaviour
     {
         if (netCurrentState.Value != (int)TurnState.WaitingForDiceRoll) return;
 
-        int dice1 = Random.Range(1, 7);
-        int dice2 = Random.Range(1, 7);
-        int total = dice1 + dice2;
+        int d1 = Random.Range(1, 7);
+        int d2 = Random.Range(1, 7);
+        int total = d1 + d2;
 
-        BroadcastDiceResultClientRpc(dice1, dice2, total);
-        StartTurnTimerOnAllClients();  // timer begins when dice are rolled
+        BroadcastDiceResultClientRpc(d1, d2, total);
+        StartTurnTimerOnAllClients();
 
         if (total == 7)
             HandleRobber();
         else
-            DistributeResources(total);
+            ResourceManager.instance.DistributeResourcesForRoll(total);
 
         netCurrentState.Value = (int)TurnState.ResourceCollection;
     }
@@ -315,17 +384,134 @@ public class TurnManager : NetworkBehaviour
 
     private void HandleRobber()
     {
-        if (friendlyRobber) { Debug.Log("Robber activated (Friendly mode — no stealing)"); return; }
-        Debug.Log("Robber activated!");
+        if (friendlyRobber) { Debug.Log("Robber (Friendly mode — skipped)"); return; }
+        RobberManager.instance?.ActivateRobber(netCurrentPlayer.Value);
     }
 
-    private void DistributeResources(int diceRoll) =>
-        ResourceManager.instance.DistributeResourcesForRoll(diceRoll);
+    // ── Bonus tracking (called by BuildManager / DevCardManager) ──
+
+    public void UpdateLongestRoad()
+    {
+        if (!IsServer) return;
+
+        int maxLen = 0, maxPlayer = -1;
+        for (int i = 0; i < totalPlayers; i++)
+        {
+            int len = CalculateLongestRoad(i);
+            if (len > maxLen) { maxLen = len; maxPlayer = i; }
+        }
+
+        if (maxLen < 5) return;
+
+        int holder = netLongestRoadPlayer.Value;
+        if (holder < 0)
+        {
+            netLongestRoadPlayer.Value = maxPlayer;
+        }
+        else if (maxPlayer != holder)
+        {
+            if (maxLen > CalculateLongestRoad(holder))
+                netLongestRoadPlayer.Value = maxPlayer;
+        }
+
+        VictoryManager.instance?.CheckVictory();
+    }
+
+    private int CalculateLongestRoad(int playerIndex)
+    {
+        Road[] allRoads = FindObjectsOfType<Road>();
+        var roads = new System.Collections.Generic.List<Road>();
+        foreach (var r in allRoads)
+            if (r.ownerPlayerIndex == playerIndex) roads.Add(r);
+
+        int n = roads.Count;
+        if (n == 0) return 0;
+
+        float radius = (BuildManager.instance != null ? BuildManager.instance.hexSize : 1f) * 0.65f;
+        BuildingPoint[] bps = FindObjectsOfType<BuildingPoint>();
+
+        // לכל דרך — מצא את נקודות-הקצה (building points) הסמוכות
+        Vector3[][] endpoints = new Vector3[n][];
+        for (int i = 0; i < n; i++)
+        {
+            var verts = new System.Collections.Generic.List<Vector3>();
+            foreach (var bp in bps)
+                if (Vector3.Distance(bp.transform.position, roads[i].transform.position) <= radius)
+                    verts.Add(bp.transform.position);
+            endpoints[i] = verts.ToArray();
+        }
+
+        bool[] vis = new bool[n];
+        int max = 0;
+        for (int s = 0; s < n; s++)
+        {
+            for (int k = 0; k < n; k++) vis[k] = false;
+            int len = DfsRoad(roads, endpoints, vis, s);
+            if (len > max) max = len;
+        }
+        return max;
+    }
+
+    private int DfsRoad(System.Collections.Generic.List<Road> roads, Vector3[][] endpoints, bool[] vis, int cur)
+    {
+        vis[cur] = true;
+        int best = 1;
+        for (int next = 0; next < roads.Count; next++)
+        {
+            if (vis[next]) continue;
+            if (RoadsShareVertex(endpoints[cur], endpoints[next]))
+            {
+                int len = 1 + DfsRoad(roads, endpoints, vis, next);
+                if (len > best) best = len;
+            }
+        }
+        vis[cur] = false; // backtrack — נסה נתיבים אחרים
+        return best;
+    }
+
+    private bool RoadsShareVertex(Vector3[] a, Vector3[] b)
+    {
+        if (a == null || b == null) return false;
+        foreach (var va in a)
+            foreach (var vb in b)
+                if (Vector3.Distance(va, vb) <= 0.25f) return true;
+        return false;
+    }
+
+    public void UpdateLargestArmy()
+    {
+        if (!IsServer || DevCardManager.instance == null) return;
+
+        int maxKnights = 0, maxPlayer = -1;
+        for (int i = 0; i < totalPlayers; i++)
+        {
+            int k = DevCardManager.instance.GetPlayedKnights(i);
+            if (k > maxKnights) { maxKnights = k; maxPlayer = i; }
+        }
+
+        if (maxKnights < 3) return;
+
+        int holder = netLargestArmyPlayer.Value;
+        if (holder < 0)
+        {
+            netLargestArmyPlayer.Value = maxPlayer;
+        }
+        else if (maxPlayer != holder)
+        {
+            int holderKnights = DevCardManager.instance.GetPlayedKnights(holder);
+            if (maxKnights > holderKnights)
+                netLargestArmyPlayer.Value = maxPlayer;
+        }
+
+        VictoryManager.instance?.CheckVictory();
+    }
+
+    // ── Phase transitions ──
 
     public void StartBuildingPhase()
     {
         if (!IsMyTurn()) return;
-        if (currentState != TurnState.ResourceCollection) { Debug.LogWarning("Must collect resources before building!"); return; }
+        if (currentState != TurnState.ResourceCollection) { Debug.LogWarning("Must collect resources first!"); return; }
         StartBuildingPhaseServerRpc();
     }
 
@@ -339,7 +525,7 @@ public class TurnManager : NetworkBehaviour
     public void StartTradingPhase()
     {
         if (!IsMyTurn()) return;
-        if (currentState != TurnState.Building) { Debug.LogWarning("Must complete building phase before trading!"); return; }
+        if (currentState != TurnState.Building) { Debug.LogWarning("Must complete building first!"); return; }
         StartTradingPhaseServerRpc();
     }
 

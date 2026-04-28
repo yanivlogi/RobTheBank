@@ -5,265 +5,289 @@ using Unity.Netcode;
 
 public class BuildManager : NetworkBehaviour
 {
-    // הוסף למעלה עם שאר המשתנים הציבוריים
-   [Header("Building Settings")]
-[Tooltip("Size of hexagons in the grid")]
-public float hexSize = 1.0f;
-[Tooltip("Distance for valid road placement")]
-public float roadConnectionDistance = 1.5f;  // הגדלת המרחק האפשרי
+    [Header("Building Settings")]
+    public float hexSize               = 1.0f;
+    public float roadConnectionDistance = 1.5f;
 
     public static BuildManager instance;
     public GameObject settlementPrefab;
+    public GameObject cityPrefab;       // prefab נפרד לעיר — גרור ב-Inspector
     public GameObject roadPrefab;
-    private bool isBuilding = false;
+
+    private bool isBuilding    = false;
     private bool isBuildingRoad = false;
     private Building.BuildingType currentBuildingType;
     private List<BuildingPoint> allBuildPoints;
 
-    void Awake()
+    // Catan limits
+    const int MAX_SETTLEMENTS = 5;
+    const int MAX_CITIES      = 4;
+    const int MAX_ROADS       = 15;
+
+    // פידבק למשתמש (Subscribe מ-BuildUI)
+    public static System.Action<string> onBuildFeedback;
+
+    // דרכים חינם מקלף Road Building (server-side)
+    private int[] freeRoadBuilds = new int[8];
+
+    public void AddFreeRoad(int playerIndex, int count = 1)
     {
-        if (instance == null)
-            instance = this;
-        else
-            Destroy(gameObject);
+        if (playerIndex >= 0 && playerIndex < freeRoadBuilds.Length)
+            freeRoadBuilds[playerIndex] += count;
     }
 
-    void Start() { }  // deferred — called by HexGridGenerator after building points are created
+    // Readable by Building.cs for OnMouseDown city check
+    public Building.BuildingType CurrentBuildingType => currentBuildingType;
+
+    void Awake()
+    {
+        if (instance == null) instance = this;
+        else Destroy(gameObject);
+    }
+
+    void OnDestroy()
+    {
+        if (instance == this) instance = null;
+    }
+
+    void Start() { } // deferred — HexGridGenerator calls RefreshBuildPoints after grid is ready
 
     public void RefreshBuildPoints()
     {
         allBuildPoints = FindObjectsOfType<BuildingPoint>().ToList();
-        UpdateValidBuildingPoints();
+        HideAllBuildPoints(); // מוסתר עד שהשחקן לוחץ על כפתור הבנייה
     }
+
+    private void HideAllBuildPoints()
+    {
+        if (allBuildPoints == null) return;
+        foreach (BuildingPoint p in allBuildPoints) p.SetVisibility(false);
+    }
+
+    // נקרא במהלך initial placement בין שחקנים
+    public void ShowValidBuildPoints()
+    {
+        if (allBuildPoints == null) return;
+        foreach (BuildingPoint p in allBuildPoints)
+            p.SetVisibility(IsValidBuildingLocation(p.transform.position));
+    }
+
+    // ── Build mode entry ──
 
     public void StartBuilding(Building.BuildingType buildingType)
     {
-        isBuilding = true;
-        isBuildingRoad = false;
+        // toggle — אם כבר פתוח באותו מצב, סגור
+        if (isBuilding && currentBuildingType == buildingType)
+        {
+            CancelBuildingClientRpc();
+            return;
+        }
+        isBuilding          = true;
+        isBuildingRoad      = false;
         currentBuildingType = buildingType;
+        // הסתר נקודות דרך אם היו פתוחות
+        foreach (BuildRoad rp in FindObjectsOfType<BuildRoad>()) rp.SetVisibility(false);
         UpdateValidBuildingPoints();
     }
 
     public void StartBuildingRoad()
-{
-    isBuilding = false;
-    isBuildingRoad = true;
-    
-    TurnManager turnManager = FindObjectOfType<TurnManager>();
-    UpdateValidRoadPoints(turnManager.currentPlayer);
-}
-
-    public bool IsBuilding()
     {
-        return isBuilding;
+        // toggle — אם כבר פתוח, סגור
+        if (isBuildingRoad)
+        {
+            CancelBuildingClientRpc();
+            return;
+        }
+        isBuilding     = false;
+        isBuildingRoad = true;
+        // הסתר נקודות ישוב אם היו פתוחות
+        HideAllBuildPoints();
+        UpdateValidRoadPoints(TurnManager.instance.currentPlayer);
     }
 
-    public bool IsBuildingRoad()
-    {
-        return isBuildingRoad;
-    }
+    public bool IsBuilding()     => isBuilding;
+    public bool IsBuildingRoad() => isBuildingRoad;
+
+    // ── Valid point highlighting ──
 
     public void UpdateValidBuildingPoints()
     {
         if (allBuildPoints == null) return;
 
-        foreach (BuildingPoint point in allBuildPoints)
+        if (isBuilding && currentBuildingType == Building.BuildingType.City)
         {
-            bool isValid = IsValidBuildingLocation(point.transform.position);
-            point.SetVisibility(isValid);
-            Debug.Log($"Setting build point visibility at {point.transform.position}: {isValid}");
+            foreach (BuildingPoint p in allBuildPoints) p.SetVisibility(false);
+            return;
         }
+
+        int player = TurnManager.instance != null ? TurnManager.instance.currentPlayer : -1;
+        bool initialPhase = TurnManager.instance != null && TurnManager.instance.isInitialPlacement;
+
+        foreach (BuildingPoint p in allBuildPoints)
+            p.SetVisibility(IsValidBuildingLocation(p.transform.position, player, initialPhase));
     }
 
-private bool IsValidBuildingLocation(Vector3 position)
-{
-    Building[] existingBuildings = FindObjectsOfType<Building>();
-    float minDistanceRequired = hexSize * 2.6f; // מרחק של בערך 2 דרכים
-
-    foreach (Building building in existingBuildings)
+    private bool IsValidBuildingLocation(Vector3 position, int playerIndex = -1, bool initialPlacement = true)
     {
-        // במקום למצוא מסלול, נבדוק את המרחק בצורה חכמה יותר
-        float distance = CalculateHexGridDistance(position, building.transform.position);
-        
-        if (distance < minDistanceRequired)
-        {
-            Debug.Log($"Too close to existing building. Distance: {distance}");
-            return false;
-        }
+        // חייב להיות רחוק מספיק מכל מבנה קיים
+        float minDist = hexSize * 2.6f;
+        foreach (Building b in FindObjectsOfType<Building>())
+            if (CalculateHexGridDistance(position, b.transform.position) < minDist)
+                return false;
+
+        // בשלב ההנחה הראשונית אין צורך בחיבור לדרך
+        if (initialPlacement || playerIndex < 0) return true;
+
+        // בשלב רגיל — חייב להיות מחובר לדרך של השחקן
+        return IsRoadConnectedToSettlement(position, playerIndex);
     }
-    return true;
-}
 
-private float CalculateHexGridDistance(Vector3 a, Vector3 b)
-{
-    // מחשב מרחק שמתחשב במבנה המשושי
-    float dx = Mathf.Abs(a.x - b.x);
-    float dy = Mathf.Abs(a.y - b.y);
-
-    // מתקן את המרחק בהתאם לזווית של הרשת המשושית
-    if ((a.y > b.y && a.x > b.x) || (a.y < b.y && a.x < b.x))
+    private float CalculateHexGridDistance(Vector3 a, Vector3 b)
     {
-        dy *= 1.15f; // מתקן את המרחק האנכי כשהולכים באלכסון
+        float dx = Mathf.Abs(a.x - b.x);
+        float dy = Mathf.Abs(a.y - b.y);
+        if ((a.y > b.y && a.x > b.x) || (a.y < b.y && a.x < b.x))
+            dy *= 1.15f;
+        return Mathf.Sqrt(dx * dx + dy * dy);
     }
 
-    return Mathf.Sqrt(dx * dx + dy * dy);
-}
+    public void OnBuildingPlaced() => CancelBuildingClientRpc();
 
-private int FindShortestPathLength(Vector3 start, Vector3 end, BuildingPoint[] points)
-{
-    // נמצא את נקודות הבנייה הקרובות לנקודת ההתחלה והסוף
-    var adjacencyPoints = new Dictionary<Vector3, List<Vector3>>();
-    
-    // בונה מפת שכנים עבור כל נקודת בנייה
-    foreach (BuildingPoint point in points)
+    [ClientRpc]
+    public void CancelBuildingClientRpc()
     {
-        Vector3 pos = point.transform.position;
-        adjacencyPoints[pos] = new List<Vector3>();
-        
-        // מוצא את כל הנקודות במרחק של דרך אחת
-        foreach (BuildingPoint otherPoint in points)
-        {
-            if (point != otherPoint)
-            {
-                float distance = Vector3.Distance(pos, otherPoint.transform.position);
-                if (distance <= hexSize * 1.2f) // מרווח קטן לסטיות
-                {
-                    adjacencyPoints[pos].Add(otherPoint.transform.position);
-                }
-            }
-        }
+        isBuilding    = false;
+        isBuildingRoad = false;
+        HideAllBuildPoints();
+        foreach (BuildRoad rp in FindObjectsOfType<BuildRoad>())
+            rp.SetVisibility(false);
     }
 
-    // מוצא את הנקודות הקרובות ביותר להתחלה ולסוף
-    Vector3 startPoint = FindNearestPoint(start, points);
-    Vector3 endPoint = FindNearestPoint(end, points);
-
-    // BFS למציאת המסלול הקצר ביותר
-    var queue = new Queue<Vector3>();
-    var distances = new Dictionary<Vector3, int>();
-    
-    queue.Enqueue(startPoint);
-    distances[startPoint] = 0;
-
-    while (queue.Count > 0)
-    {
-        Vector3 current = queue.Dequeue();
-        
-        if (current == endPoint)
-            return distances[current];
-
-        foreach (Vector3 neighbor in adjacencyPoints[current])
-        {
-            if (!distances.ContainsKey(neighbor))
-            {
-                distances[neighbor] = distances[current] + 1;
-                queue.Enqueue(neighbor);
-            }
-        }
-    }
-
-    return int.MaxValue; // אם לא נמצא מסלול
-}
-
-private Vector3 FindNearestPoint(Vector3 position, BuildingPoint[] points)
-{
-    float minDistance = float.MaxValue;
-    Vector3 nearest = Vector3.zero;
-
-    foreach (BuildingPoint point in points)
-    {
-        float distance = Vector3.Distance(position, point.transform.position);
-        if (distance < minDistance)
-        {
-            minDistance = distance;
-            nearest = point.transform.position;
-        }
-    }
-
-    return nearest;
-}
-    private bool IsPointBetweenBuildings(Vector3 point, Vector3 start, Vector3 end)
-    {
-        float totalDistance = Vector3.Distance(start, end);
-        float distanceFromStart = Vector3.Distance(start, point);
-        float distanceFromEnd = Vector3.Distance(point, end);
-
-        // מרווח שגיאה קטן לחישובים
-        float tolerance = 0.1f;
-
-        // הנקודה נחשבת "בין" אם סכום המרחקים שלה מנקודת ההתחלה והסוף
-        // שווה בערך למרחק הישיר בין נקודת ההתחלה והסוף
-        return Mathf.Abs(distanceFromStart + distanceFromEnd - totalDistance) < tolerance;
-    }
-
-    public void OnBuildingPlaced()
-    {
-        UpdateValidBuildingPoints();
-    }
+    // ── Build actions (called from BuildingPoint or Building click) ──
 
     public void BuildAtCorner(Vector3 position)
     {
         if (!isBuilding) return;
-        int currentPlayer = TurnManager.instance.currentPlayer;
-        if (ResourceManager.instance.CanPlayerBuild(currentPlayer, currentBuildingType))
-            BuildAtCornerServerRpc(position, currentPlayer, (int)currentBuildingType);
+        int player = TurnManager.instance.currentPlayer;
+
+        if (currentBuildingType == Building.BuildingType.City)
+        {
+            if (!ResourceManager.instance.CanPlayerBuild(player, Building.BuildingType.City))
+            { onBuildFeedback?.Invoke("צריך: 2 חיטה + 3 עפרת"); return; }
+            BuildAtCornerServerRpc(position, player, (int)Building.BuildingType.City);
+        }
         else
-            Debug.Log("Not enough resources!");
+        {
+            if (!ResourceManager.instance.CanPlayerBuild(player, currentBuildingType))
+            { onBuildFeedback?.Invoke("צריך: עץ + לבנה + חיטה + כבשה"); return; }
+            BuildAtCornerServerRpc(position, player, (int)currentBuildingType);
+        }
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void BuildAtCornerServerRpc(Vector3 position, int playerIndex, int buildingType)
     {
-        if (!IsValidBuildingLocation(position)) return;
+        var bt = (Building.BuildingType)buildingType;
+
+        if (bt == Building.BuildingType.City)
+        {
+            foreach (Building b in FindObjectsOfType<Building>())
+            {
+                if (b.ownerPlayerIndex == playerIndex &&
+                    b.type == Building.BuildingType.Settlement &&
+                    Vector3.Distance(b.transform.position, position) <= 0.5f)
+                {
+                    if (CountBuildings(playerIndex, Building.BuildingType.City) >= MAX_CITIES) return;
+                    ResourceManager.instance.PurchaseBuilding(playerIndex, Building.BuildingType.City);
+
+                    Vector3 pos = b.transform.position;
+                    b.GetComponent<NetworkObject>().Despawn(true); // הסר ישוב
+
+                    // בנה עיר — אם יש cityPrefab נפרד השתמש בו, אחרת שדרג את אותו prefab
+                    var prefab = cityPrefab != null ? cityPrefab : settlementPrefab;
+                    var cityGo = Instantiate(prefab, pos, Quaternion.identity);
+                    cityGo.GetComponent<NetworkObject>().Spawn(true);
+                    cityGo.GetComponent<Building>().Initialize(playerIndex, Building.BuildingType.City);
+
+                    CancelBuildingClientRpc();
+                    VictoryManager.instance?.CheckVictory();
+                    return;
+                }
+            }
+            return;
+        }
+
+        // Settlement
+        if (!IsValidBuildingLocation(position, playerIndex, false)) return;
+        if (CountBuildings(playerIndex, Building.BuildingType.Settlement) >= MAX_SETTLEMENTS) return;
+
         var go = Instantiate(settlementPrefab, position, Quaternion.identity);
         go.GetComponent<NetworkObject>().Spawn(true);
-        go.GetComponent<Building>().Initialize(playerIndex, (Building.BuildingType)buildingType);
-        ResourceManager.instance.PurchaseBuilding(playerIndex, (Building.BuildingType)buildingType);
-        isBuilding = false;
-        OnBuildingPlaced();
+        go.GetComponent<Building>().Initialize(playerIndex, Building.BuildingType.Settlement);
+        ResourceManager.instance.PurchaseBuilding(playerIndex, Building.BuildingType.Settlement);
+        CancelBuildingClientRpc();
+        VictoryManager.instance?.CheckVictory();
     }
+
+    private int CountBuildings(int playerIndex, Building.BuildingType type)
+    {
+        int count = 0;
+        foreach (Building b in FindObjectsOfType<Building>())
+            if (b.ownerPlayerIndex == playerIndex && b.type == type) count++;
+        return count;
+    }
+
+    // ── Roads ──
 
     public void BuildRoad(Vector3 position, float rotation)
     {
         if (!isBuildingRoad) return;
-        int currentPlayer = TurnManager.instance.currentPlayer;
-        var roadCost = new Dictionary<string, int> { {"Wood", 1}, {"Brick", 1} };
-        if (ResourceManager.instance.HasEnoughResources(currentPlayer, roadCost))
-            BuildRoadServerRpc(position, rotation, currentPlayer);
+        int player = TurnManager.instance.currentPlayer;
+        var cost = new Dictionary<string, int> { {"Wood",1}, {"Brick",1} };
+        bool hasFree = player < freeRoadBuilds.Length && freeRoadBuilds[player] > 0;
+        if (hasFree || ResourceManager.instance.HasEnoughResources(player, cost))
+            BuildRoadServerRpc(position, rotation, player);
         else
-            Debug.Log("Not enough resources for road!");
+            onBuildFeedback?.Invoke("צריך: עץ + לבנה לדרך");
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void BuildRoadServerRpc(Vector3 position, float rotation, int playerIndex)
     {
+        if (CountRoads(playerIndex) >= MAX_ROADS) return;
+
+        bool usedFree = playerIndex < freeRoadBuilds.Length && freeRoadBuilds[playerIndex] > 0;
+        if (usedFree)
+        {
+            freeRoadBuilds[playerIndex]--;
+        }
+        else
+        {
+            var cost = new Dictionary<string, int> { {"Wood",1}, {"Brick",1} };
+            if (!ResourceManager.instance.HasEnoughResources(playerIndex, cost)) return;
+            ResourceManager.instance.SpendResources(playerIndex, cost);
+        }
+
+        // בדיקת כפילות
+        foreach (Road r in FindObjectsOfType<Road>())
+            if (Vector3.Distance(r.transform.position, position) <= 0.25f) return;
+
         var go = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
         go.GetComponent<NetworkObject>().Spawn(true);
         go.GetComponent<Road>().SetOwner(playerIndex);
-        var roadCost = new Dictionary<string, int> { {"Wood", 1}, {"Brick", 1} };
-        ResourceManager.instance.SpendResources(playerIndex, roadCost);
-        isBuildingRoad = false;
+        CancelBuildingClientRpc();
+        TurnManager.instance?.UpdateLongestRoad();
     }
 
-    public void BuildInitialRoad(Vector3 position, float rotation)
+    private int CountRoads(int playerIndex)
     {
-        int currentPlayer = TurnManager.instance.currentPlayer;
-        BuildInitialRoadServerRpc(position, rotation, currentPlayer);
+        int count = 0;
+        foreach (Road r in FindObjectsOfType<Road>())
+            if (r.ownerPlayerIndex == playerIndex) count++;
+        return count;
     }
-private BuildRoad FindRoadPointAtPosition(Vector3 position)
-{
-    float threshold = 0.1f; // מרחק סף לזיהוי נקודת הדרך
-    BuildRoad[] roadPoints = FindObjectsOfType<BuildRoad>();
-    
-    foreach (BuildRoad point in roadPoints)
-    {
-        if (Vector3.Distance(point.transform.position, position) < threshold)
-        {
-            return point;
-        }
-    }
-    return null;
-}
+
+    // ── Initial placement ──
 
     public void BuildInitialSettlement(Vector3 position, int playerIndex)
     {
@@ -273,11 +297,22 @@ private BuildRoad FindRoadPointAtPosition(Vector3 position)
     [ServerRpc(RequireOwnership = false)]
     private void BuildInitialSettlementServerRpc(Vector3 position, int playerIndex)
     {
-        if (!IsValidBuildingLocation(position)) return;
+        if (!IsValidBuildingLocation(position, -1, true)) return;
         var go = Instantiate(settlementPrefab, position, Quaternion.identity);
         go.GetComponent<NetworkObject>().Spawn(true);
         go.GetComponent<Building>().Initialize(playerIndex, Building.BuildingType.Settlement);
         OnBuildingPlaced();
+    }
+
+    public void BuildInitialRoad(Vector3 position, float rotation)
+    {
+        int player = TurnManager.instance.currentPlayer;
+        BuildInitialRoadServerRpc(position, rotation, player);
+    }
+
+    public void BuildInitialRoad(Vector3 position, int playerIndex)
+    {
+        BuildInitialRoadServerRpc(position, 0f, playerIndex);
     }
 
     [ServerRpc(RequireOwnership = false)]
@@ -288,86 +323,38 @@ private BuildRoad FindRoadPointAtPosition(Vector3 position)
         go.GetComponent<Road>().SetOwner(playerIndex);
     }
 
-    public void BuildInitialRoad(Vector3 position, int playerIndex)
-    {
-        BuildInitialRoadServerRpc(position, 0f, playerIndex);
-    }
+    // ── Road connection checks ──
 
- public bool IsRoadConnectedToSettlement(Vector3 roadPosition, int playerIndex)
-{
-    float maxDistance = roadConnectionDistance;  // שימוש במשתנה החדש
-
-    // בדיקת חיבור למבנים
-    Building[] buildings = FindObjectsOfType<Building>();
-    foreach (Building building in buildings)
+    public bool IsRoadConnectedToSettlement(Vector3 roadPosition, int playerIndex)
     {
-        if (building != null && building.ownerPlayerIndex == playerIndex)
-        {
-            float distance = Vector3.Distance(roadPosition, building.transform.position);
-            Debug.Log($"Checking distance to building: {distance}"); // לוג לדיבאג
-            if (distance <= maxDistance)
-            {
+        foreach (Building b in FindObjectsOfType<Building>())
+            if (b.ownerPlayerIndex == playerIndex &&
+                Vector3.Distance(roadPosition, b.transform.position) <= roadConnectionDistance)
                 return true;
-            }
-        }
-    }
 
-    // בדיקת חיבור לדרכים קיימות
-    GameObject[] existingRoads = GameObject.FindGameObjectsWithTag("Road");
-    foreach (GameObject road in existingRoads)
-    {
-        SpriteRenderer roadRenderer = road.GetComponent<SpriteRenderer>();
-        if (roadRenderer != null && roadRenderer.color == GetPlayerColor(playerIndex))
-        {
-            float distance = Vector3.Distance(roadPosition, road.transform.position);
-            Debug.Log($"Checking distance to road: {distance}"); // לוג לדיבאג
-            if (distance <= maxDistance)
-            {
+        foreach (Road road in FindObjectsOfType<Road>())
+            if (road.ownerPlayerIndex == playerIndex &&
+                Vector3.Distance(roadPosition, road.transform.position) <= roadConnectionDistance)
                 return true;
-            }
-        }
+
+        return false;
     }
 
-    return false;
-}
+    public void UpdateValidRoadPoints(int playerIndex)
+    {
+        foreach (BuildRoad p in FindObjectsOfType<BuildRoad>())
+            p.SetVisibility(IsRoadConnectedToSettlement(p.transform.position, playerIndex));
+    }
 
-public void UpdateValidRoadPoints(int playerIndex)
-{
-    BuildRoad[] roadPoints = FindObjectsOfType<BuildRoad>();
-    foreach (BuildRoad point in roadPoints)
+    void OnDrawGizmos()
     {
-        bool isValid = IsRoadConnectedToSettlement(point.transform.position, playerIndex);
-        point.SetVisibility(isValid);
-    }
-}
-    private Color GetPlayerColor(int playerIndex)
-    {
-        switch(playerIndex)
+        if (!isBuilding && !isBuildingRoad) return;
+        foreach (Building b in FindObjectsOfType<Building>())
         {
-            case 0: return Color.red;
-            case 1: return Color.blue;
-            case 2: return Color.green;
-            case 3: return Color.yellow;
-            default: return Color.white;
-        }
-    }
-     void OnDrawGizmos()
-    {
-        if (isBuilding || isBuildingRoad)
-        {
-            TurnManager turnManager = FindObjectOfType<TurnManager>();
-            if (turnManager != null)
+            if (b.ownerPlayerIndex == TurnManager.instance?.currentPlayer)
             {
-                // מציג את טווח החיבור סביב כל מבנה של השחקן הנוכחי
-                Building[] buildings = FindObjectsOfType<Building>();
-                foreach (Building building in buildings)
-                {
-                    if (building.ownerPlayerIndex == turnManager.currentPlayer)
-                    {
-                        Gizmos.color = new Color(0, 1, 0, 0.2f);
-                        Gizmos.DrawWireSphere(building.transform.position, roadConnectionDistance);
-                    }
-                }
+                Gizmos.color = new Color(0, 1, 0, 0.2f);
+                Gizmos.DrawWireSphere(b.transform.position, roadConnectionDistance);
             }
         }
     }

@@ -31,8 +31,12 @@ public class HexGridGenerator : MonoBehaviour
     public Sprite desertSprite;
 
     [Header("Building Points")]
-    public GameObject buildPointPrefab;  
-    public GameObject roadPointPrefab;   
+    public GameObject buildPointPrefab;
+    public GameObject roadPointPrefab;
+    [Tooltip("גודל נקודות הדרך (Road Points)")]
+    public float roadPointScale  = 0.15f;
+    [Tooltip("גודל נקודות הבנייה (Build Points)")]
+    public float buildPointScale = 0.15f;
 
     public static HexGridGenerator instance;
 
@@ -118,6 +122,7 @@ public class HexGridGenerator : MonoBehaviour
         GameObject point = Instantiate(buildPointPrefab, parent.position + localPosition, Quaternion.identity);
         point.name = pointName;
         point.transform.SetParent(parent);
+        point.transform.localScale = Vector3.one * buildPointScale;
         point.AddComponent<BuildingPoint>();
         return point.transform;
     }
@@ -158,7 +163,7 @@ private void CreateRoadPoints(Transform parent)
         GameObject roadPoint = Instantiate(roadPointPrefab, parent.position + roadPositions[i], Quaternion.Euler(0, 0, roadAngles[i]));
         roadPoint.name = roadNames[i];
         roadPoint.transform.SetParent(parent);
-        Debug.Log($"Created {roadNames[i]} with rotation {roadAngles[i]}");
+        roadPoint.transform.localScale = Vector3.one * roadPointScale;
     }
 }
     List<string> BuildResourceListForHexCount(int hexCount)

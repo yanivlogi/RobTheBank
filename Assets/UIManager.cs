@@ -22,6 +22,6 @@ public class UIManager : MonoBehaviour
 
     public void UpdateDiceResult(int diceResult)
     {
-        turnStatusText.text += $"\nתוצאת קוביות: {diceResult}";
+        turnStatusText.text = $"תוצאת קוביות: {diceResult}";
     }
 }
