@@ -17,6 +17,11 @@ public class DevCardManager : NetworkBehaviour
     // Server-side deck
     private int deckKnight = 14, deckVP = 5, deckRoadBuilding = 2, deckYearOfPlenty = 2, deckMonopoly = 2;
 
+    // Once-per-turn dev card limit (server-side only)
+    private int devCardPlayedByPlayer = -1;
+
+    public void ResetDevCardForNewTurn() { devCardPlayedByPlayer = -1; }
+
     void Awake()
     {
         if (instance == null) instance = this;
@@ -52,24 +57,26 @@ public class DevCardManager : NetworkBehaviour
         int total = deckKnight + deckVP + deckRoadBuilding + deckYearOfPlenty + deckMonopoly;
         if (total == 0) return;
 
+        // אתחול הגנתי — אם הרשימה לא אותחלה בזמן
+        int needed = (playerIndex + 1) * CARD_TYPES;
+        while (playerCards.Count < needed) playerCards.Add(0);
+
         ResourceManager.instance.SpendResources(playerIndex, cost);
 
         int roll = Random.Range(0, total);
         CardType drawn;
         int cum = deckKnight;
-        if      (roll < cum)                       { drawn = CardType.Knight;       deckKnight--; }
+        if      (roll < cum)  { drawn = CardType.Knight;       deckKnight--; }
         else { cum += deckVP;
-        if      (roll < cum)                       { drawn = CardType.VP;           deckVP--; }
+        if      (roll < cum)  { drawn = CardType.VP;           deckVP--; }
         else { cum += deckRoadBuilding;
-        if      (roll < cum)                       { drawn = CardType.RoadBuilding; deckRoadBuilding--; }
+        if      (roll < cum)  { drawn = CardType.RoadBuilding; deckRoadBuilding--; }
         else { cum += deckYearOfPlenty;
-        if      (roll < cum)                       { drawn = CardType.YearOfPlenty; deckYearOfPlenty--; }
-        else                                       { drawn = CardType.Monopoly;     deckMonopoly--; }}}}
+        if      (roll < cum)  { drawn = CardType.YearOfPlenty; deckYearOfPlenty--; }
+        else                  { drawn = CardType.Monopoly;     deckMonopoly--; }}}}
 
-        int idx = playerIndex * CARD_TYPES + (int)drawn;
-        if (idx < playerCards.Count) playerCards[idx]++;
+        playerCards[playerIndex * CARD_TYPES + (int)drawn]++;
 
-        // VP cards count immediately toward victory
         if (drawn == CardType.VP)
             VictoryManager.instance?.CheckVictory();
 
@@ -79,15 +86,26 @@ public class DevCardManager : NetworkBehaviour
     [ClientRpc]
     private void RevealCardClientRpc(int playerIndex, int cardType)
     {
-        if (PlayerManager.LocalPlayerIndex == playerIndex)
-            Debug.Log($"[DevCard] You drew: {(CardType)cardType}");
+        if (PlayerManager.LocalPlayerIndex != playerIndex) return;
+        string cardName = (CardType)cardType switch
+        {
+            CardType.Knight       => "פרש ⚔",
+            CardType.VP           => "נקודת ניצחון 🏆",
+            CardType.RoadBuilding => "בניית דרכים 🛤",
+            CardType.YearOfPlenty => "שנת שפע ✨",
+            CardType.Monopoly     => "מונופול 💰",
+            _                     => "קלף"
+        };
+        BuildManager.onBuildFeedback?.Invoke($"קיבלת: {cardName}!");
     }
 
     [ServerRpc(RequireOwnership = false)]
     public void PlayRoadBuildingServerRpc(int playerIndex)
     {
+        if (devCardPlayedByPlayer == playerIndex) return;
         int idx = playerIndex * CARD_TYPES + (int)CardType.RoadBuilding;
         if (idx >= playerCards.Count || playerCards[idx] <= 0) return;
+        devCardPlayedByPlayer = playerIndex;
         playerCards[idx]--;
         BuildManager.instance?.AddFreeRoad(playerIndex, 2);
         RoadBuildingActivatedClientRpc(playerIndex);
@@ -106,8 +124,10 @@ public class DevCardManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     public void PlayYearOfPlentyServerRpc(int playerIndex, int resource1Idx, int resource2Idx)
     {
+        if (devCardPlayedByPlayer == playerIndex) return;
         int idx = playerIndex * CARD_TYPES + (int)CardType.YearOfPlenty;
         if (idx >= playerCards.Count || playerCards[idx] <= 0) return;
+        devCardPlayedByPlayer = playerIndex;
         playerCards[idx]--;
         string[] names = ResourceManager.GetResourceNames();
         if (resource1Idx < names.Length) ResourceManager.instance.AddResource(playerIndex, names[resource1Idx], 1);
@@ -117,8 +137,10 @@ public class DevCardManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     public void PlayMonopolyServerRpc(int playerIndex, int resourceIdx)
     {
+        if (devCardPlayedByPlayer == playerIndex) return;
         int idx = playerIndex * CARD_TYPES + (int)CardType.Monopoly;
         if (idx >= playerCards.Count || playerCards[idx] <= 0) return;
+        devCardPlayedByPlayer = playerIndex;
         playerCards[idx]--;
         string[] names = ResourceManager.GetResourceNames();
         if (resourceIdx >= names.Length) return;
@@ -145,9 +167,10 @@ public class DevCardManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     public void PlayKnightServerRpc(int playerIndex)
     {
+        if (devCardPlayedByPlayer == playerIndex) return;
         int idx = playerIndex * CARD_TYPES + (int)CardType.Knight;
         if (idx >= playerCards.Count || playerCards[idx] <= 0) return;
-
+        devCardPlayedByPlayer = playerIndex;
         playerCards[idx]--;
         if (playerIndex < playedKnights.Count)
             playedKnights[playerIndex]++;
@@ -158,6 +181,7 @@ public class DevCardManager : NetworkBehaviour
 
     public int GetCard(int playerIndex, CardType type)
     {
+        if (playerIndex < 0) return 0;
         int idx = playerIndex * CARD_TYPES + (int)type;
         return (idx >= 0 && idx < playerCards.Count) ? playerCards[idx] : 0;
     }

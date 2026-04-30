@@ -87,6 +87,13 @@ public class ResourceManager : NetworkBehaviour
 
     private void DistributeResourcesFromTile(HexTile tile)
     {
+        // השודד חוסם את האריח
+        if (RobberManager.instance != null &&
+            Vector3.Distance(tile.transform.position, RobberManager.instance.RobberHexPos) <= 0.5f)
+        {
+            Debug.Log($"[Distribute] Tile '{tile.gameObject.name}' blocked by robber");
+            return;
+        }
         Debug.Log($"[Distribute] Tile '{tile.gameObject.name}' pos={tile.transform.position} resource={tile.resourceType} number={tile.resourceNumber}");
         CheckBuildPoint(tile.buildTL, tile.resourceType, "buildTL");
         CheckBuildPoint(tile.buildT,  tile.resourceType, "buildT");
@@ -124,9 +131,16 @@ public class ResourceManager : NetworkBehaviour
 
     public bool HasEnoughResources(int playerIndex, Dictionary<string, int> cost)
     {
-        if (playerIndex >= 0 && playerIndex < playerResources?.Length)
+        // Server reads from authoritative array; clients read from synced NetworkList
+        if (IsServer && playerResources != null && playerIndex < playerResources.Length)
             return playerResources[playerIndex].HasEnoughResources(cost);
-        return false;
+
+        foreach (var item in cost)
+        {
+            int slot = System.Array.IndexOf(ResourceOrder, item.Key);
+            if (slot < 0 || GetNetResource(playerIndex, slot) < item.Value) return false;
+        }
+        return true;
     }
 
     public void SpendResources(int playerIndex, Dictionary<string, int> cost)

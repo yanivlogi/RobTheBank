@@ -49,6 +49,9 @@ public class TurnManager : NetworkBehaviour
     public UnityEvent<int>   onDiceRolled;
     public UnityEvent<float> onTurnTimerTick;
 
+    // (d1, d2) — נרשם ע"י DiceUI
+    public static System.Action<int, int> onDiceRolledPair;
+
     public enum TurnState
     {
         WaitingForSettlement,
@@ -345,6 +348,7 @@ public class TurnManager : NetworkBehaviour
         netCurrentPlayer.Value = next;
         netCurrentState.Value  = (int)TurnState.WaitingForDiceRoll;
         BuildManager.instance?.CancelBuildingClientRpc();
+        DevCardManager.instance?.ResetDevCardForNewTurn();
         Debug.Log($"Player {netCurrentPlayer.Value + 1}'s turn");
     }
 
@@ -365,12 +369,17 @@ public class TurnManager : NetworkBehaviour
         int total = d1 + d2;
 
         BroadcastDiceResultClientRpc(d1, d2, total);
-        StartTurnTimerOnAllClients();
 
         if (total == 7)
+        {
+            // השעון לא יתחיל — יחודש ע"י RobberManager.OnRobberFullyResolved
             HandleRobber();
+        }
         else
+        {
+            StartTurnTimerOnAllClients();
             ResourceManager.instance.DistributeResourcesForRoll(total);
+        }
 
         netCurrentState.Value = (int)TurnState.ResourceCollection;
     }
@@ -380,6 +389,7 @@ public class TurnManager : NetworkBehaviour
     {
         Debug.Log($"Rolled: {d1} + {d2} = {total}");
         onDiceRolled?.Invoke(total);
+        onDiceRolledPair?.Invoke(d1, d2);
     }
 
     private void HandleRobber()
@@ -389,6 +399,11 @@ public class TurnManager : NetworkBehaviour
     }
 
     // ── Bonus tracking (called by BuildManager / DevCardManager) ──
+
+    public void ResumeTimerAfterRobber()
+    {
+        if (IsServer) StartTurnTimerOnAllClients();
+    }
 
     public void UpdateLongestRoad()
     {

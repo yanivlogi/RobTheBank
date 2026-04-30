@@ -275,8 +275,29 @@ public class BuildManager : NetworkBehaviour
         var go = Instantiate(roadPrefab, position, Quaternion.Euler(0, 0, rotation));
         go.GetComponent<NetworkObject>().Spawn(true);
         go.GetComponent<Road>().SetOwner(playerIndex);
-        CancelBuildingClientRpc();
         TurnManager.instance?.UpdateLongestRoad();
+
+        // אם נשארו דרכים חינם — הפעל מחדש בניית דרך אצל השחקן הספציפי
+        if (usedFree && playerIndex < freeRoadBuilds.Length && freeRoadBuilds[playerIndex] > 0)
+        {
+            ulong clientId = PlayerManager.instance?.GetClientIdForPlayerIndex(playerIndex) ?? 0;
+            ContinueRoadBuildingClientRpc(new ClientRpcParams
+                { Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } } });
+        }
+        else
+        {
+            CancelBuildingClientRpc();
+        }
+    }
+
+    [ClientRpc]
+    private void ContinueRoadBuildingClientRpc(ClientRpcParams rpcParams = default)
+    {
+        isBuilding     = false;
+        isBuildingRoad = true;
+        HideAllBuildPoints();
+        UpdateValidRoadPoints(TurnManager.instance != null ? TurnManager.instance.currentPlayer : 0);
+        onBuildFeedback?.Invoke("הנח דרך חינם נוספת!");
     }
 
     private int CountRoads(int playerIndex)

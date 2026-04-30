@@ -68,6 +68,7 @@
     <Compile Include="Assets\LobbyListItem.cs" />
     <Compile Include="Assets\TextMesh Pro\Examples &amp; Extras\Scripts\EnvMapAnimator.cs" />
     <Compile Include="Assets\BuildUI.cs" />
+    <Compile Include="Assets\DiceUI.cs" />
     <Compile Include="Assets\TextMesh Pro\Examples &amp; Extras\Scripts\TMP_TextSelector_A.cs" />
     <Compile Include="Assets\PlayerCardManager.cs" />
     <Compile Include="Assets\UIManager.cs" />
@@ -128,6 +129,7 @@
     <Compile Include="Assets\PlayerCardUI.cs" />
     <Compile Include="Assets\Building.cs" />
     <Compile Include="Assets\NetworkHandler.cs" />
+    <Compile Include="Assets\DiscardUI.cs" />
     <Compile Include="Assets\TileClickHandler.cs" />
     <Compile Include="Assets\Samples\Authentication\3.6.1\UI Example\FacebookLoginUIExample.cs" />
     <Compile Include="Assets\TextMesh Pro\Examples &amp; Extras\Scripts\TMP_TextInfoDebugTool.cs" />

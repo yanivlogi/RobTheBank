@@ -96,4 +96,11 @@ public class PlayerManager : NetworkBehaviour
                 return NetworkManager.Singleton.ConnectedClients.ContainsKey(kv.Key);
         return true; // not yet registered = still joining, treat as connected
     }
+
+    public ulong GetClientIdForPlayerIndex(int playerIndex)
+    {
+        foreach (var kv in clientIndexMap)
+            if (kv.Value == playerIndex) return kv.Key;
+        return 0;
+    }
 }

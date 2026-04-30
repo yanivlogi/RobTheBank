@@ -17,11 +17,13 @@ public class UIManager : MonoBehaviour
 
     public void UpdateTurnStatus(int playerNumber)
     {
-        turnStatusText.text = $"תור שחקן {playerNumber + 1}";
+        if (turnStatusText != null)
+            turnStatusText.text = $"תור שחקן {playerNumber + 1}";
     }
 
     public void UpdateDiceResult(int diceResult)
     {
-        turnStatusText.text = $"תוצאת קוביות: {diceResult}";
+        if (turnStatusText != null)
+            turnStatusText.text = $"תוצאת קוביות: {diceResult}";
     }
 }

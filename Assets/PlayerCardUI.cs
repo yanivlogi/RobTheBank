@@ -75,11 +75,22 @@ public class PlayerCardUI : MonoBehaviour
             if (cachedAvatar != null) avatarImage.sprite = cachedAvatar;
         }
 
-        // Victory points
+        // נקודות — שחקן אחר רואה רק נקודות גלויות; אתה רואה גם נקודות VP סודיות
         if (pointsText != null)
-            pointsText.text = (VictoryManager.instance != null
-                ? VictoryManager.instance.GetTotalPoints(playerIndex)
-                : GetBuildingPoints()).ToString();
+        {
+            if (VictoryManager.instance != null)
+            {
+                int visible = VictoryManager.instance.GetVisiblePoints(playerIndex);
+                int total   = VictoryManager.instance.GetTotalPoints(playerIndex);
+                pointsText.text = (isLocalPlayer && total > visible)
+                    ? $"{visible} ({total})"
+                    : visible.ToString();
+            }
+            else
+            {
+                pointsText.text = GetBuildingPoints().ToString();
+            }
+        }
 
         // Roads
         if (roadsText != null) roadsText.text = GetRoadCount().ToString();

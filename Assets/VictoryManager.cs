@@ -60,7 +60,15 @@ public class VictoryManager : NetworkBehaviour
         }
     }
 
+    // נקודות אמיתיות — כולל קלפי VP (נראה רק לשחקן עצמו)
     public int GetTotalPoints(int playerIndex)
+    {
+        return GetVisiblePoints(playerIndex) +
+               (DevCardManager.instance != null ? DevCardManager.instance.GetVPCards(playerIndex) : 0);
+    }
+
+    // נקודות גלויות — ללא קלפי VP (נראה לכל השחקנים)
+    public int GetVisiblePoints(int playerIndex)
     {
         int pts = 0;
         foreach (Building b in FindObjectsOfType<Building>())
@@ -72,9 +80,6 @@ public class VictoryManager : NetworkBehaviour
             if (TurnManager.instance.longestRoadPlayer == playerIndex) pts += 2;
             if (TurnManager.instance.largestArmyPlayer == playerIndex) pts += 2;
         }
-        if (DevCardManager.instance != null)
-            pts += DevCardManager.instance.GetVPCards(playerIndex);
-
         return pts;
     }
 
